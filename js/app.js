@@ -41,7 +41,28 @@
     $("legend").appendChild(li);
   }
 
+  /* Auto Modeling 시설 체크박스 — 기본 선택(필수 시설은 항상 포함) */
+  const FACILITY_DEFAULTS = {
+    water_treatment: true, nurse_station: true, changing_room: true,
+    toilet: true, storage: true, isolation_room: true,
+  };
+
+  function buildFacilityChecks() {
+    const wrap = $("facility-checks");
+    Object.entries(equipmentData)
+      .filter(([k, s]) => s.type === "room" || s.type === "infrastructure")
+      .forEach(([k, s]) => {
+        const label = document.createElement("label");
+        label.className = "fac-check";
+        label.innerHTML = `<input type="checkbox" data-key="${k}"
+          ${FACILITY_DEFAULTS[k] ? "checked" : ""} ${k === "water_treatment" ? "checked disabled" : ""} />
+          ${s.label}${k === "water_treatment" ? " (필수)" : ""}`;
+        wrap.appendChild(label);
+      });
+  }
+
   function buildToolbar() {
+    buildFacilityChecks();
     Object.entries(equipmentData).forEach(([key, spec]) => addEquipmentButton(key, spec));
     Object.entries(doorData).forEach(([key, spec]) => {
       $("door-buttons").appendChild(makeAssetButton(spec, `폭 ${toMM(spec.width)}`,
@@ -267,6 +288,28 @@
       const { beds } = FloorCanvas.autoLayout();
       toast(`자동 배치 완료: 병상 ${beds}개 + 부속실 + 급수/배수 배관.\n'검증' 버튼으로 규격을 확인하세요.`, "info", 5000);
     });
+    // Auto Modeling: 선택 시설 + 목표 병상 대수로 매번 다른 랜덤 구성 생성
+    $("btn-auto-model").addEventListener("click", () => {
+      FloorCanvas.setWallThickness(toCM(+$("wall-thickness").value));
+      if (!FloorCanvas.getCanvas().backgroundImage) {
+        const w = toCM(+$("room-width").value), h = toCM(+$("room-height").value);
+        if (w < 300 || h < 300) return toast("병실 크기는 최소 3,000mm × 3,000mm 이상이어야 합니다.");
+        FloorCanvas.newRoom(w, h);
+      }
+      const facilities = [...new Set(["water_treatment",
+        ...[...document.querySelectorAll("#facility-checks input:checked")].map((el) => el.dataset.key)])];
+      const r = FloorCanvas.autoModel({
+        targetBeds: +$("target-beds").value,
+        facilities,
+        seed: (Date.now() ^ Math.floor(Math.random() * 1e9)) >>> 0, // 누를 때마다 다른 시드
+      });
+      $("validation-report").textContent = "아직 검증하지 않았습니다.";
+      toast(r.placed >= r.target
+        ? `Auto Modeling 완료: 병상 ${r.placed}대 배치 (서비스 존 ${r.variant.techSide === "left" ? "좌측" : "우측"}, 통로 ${r.variant.aisle * 10}mm).\n버튼을 다시 누르면 다른 구성이 생성됩니다.`
+        : `공간 제약으로 요청 ${r.target}대 중 ${r.placed}대만 배치했습니다.\n병실 크기를 늘리거나 시설 수를 줄여보세요. (다시 누르면 다른 구성 시도)`,
+        r.placed >= r.target ? "info" : "error", 6000);
+    });
+
     $("btn-validate").addEventListener("click", runValidation);
     $("btn-save-json").addEventListener("click", saveJSON);
     $("btn-load-json").addEventListener("click", () => $("json-file-input").click());

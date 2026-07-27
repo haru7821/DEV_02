@@ -637,6 +637,188 @@ const FloorCanvas = (() => {
     return blueprintMode;
   }
 
+  /* ───────────────── Auto Modeling: 랜덤 변형 자동 설계 ─────────────────
+   * 선택한 시설 + 목표 병상 대수를 받아, 시드 난수로 배치 변수(서비스 존
+   * 방향·통로 폭·병상 간격·시설 순서)를 바꿔가며 매번 다른 도면을 생성한다.
+   * 병상은 목표 대수까지 최대한 채우고, 통로 150cm 이상·병상 간격 규격을
+   * 지키는 "편의성 우선" 행 배치를 사용한다. */
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function autoModel(opts = {}) {
+    const target = Math.max(1, Math.round(opts.targetBeds ?? 20));
+    const chosen = (opts.facilities ?? []).filter((k) => equipmentData[k]);
+    const rng = mulberry32((opts.seed ?? 1) >>> 0);
+    const pick = (arr) => arr[Math.floor(rng() * arr.length)];
+    const shuffle = (arr) => {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    };
+
+    beginBulk();
+    const W = room.width, H = room.height;
+    newRoomKeepBackground(W, H);
+    const M = 10;
+
+    // ── 시설 분류: 기술 밴드(측면 세로 적층) vs 환자 밴드(하단 가로) ──
+    const TECH = ["water_treatment", "storage", "linen_room", "laundry_room",
+                  "waste_room", "clean_room", "core"];
+    const techSide = pick(["left", "right"]); // 변형 포인트 ①: 서비스 존 방향
+    let techKeys = shuffle(chosen.filter((k) => TECH.includes(k)));
+    techKeys = ["water_treatment", ...techKeys.filter((k) => k !== "water_treatment")]; // 정수실은 코너 고정
+    const hasIso = chosen.includes("isolation_room");
+    let patientKeys = shuffle(chosen.filter((k) => !TECH.includes(k) && k !== "isolation_room"));
+    // 편의성: 간호사실은 환자 밴드 중앙 — 병상 전체 관찰 동선 확보
+    if (patientKeys.includes("nurse_station")) {
+      patientKeys = patientKeys.filter((k) => k !== "nurse_station");
+      patientKeys.splice(Math.floor(patientKeys.length / 2), 0, "nurse_station");
+    }
+
+    // ── 기술 밴드: 측면 벽을 따라 세로 적층 + 안쪽 여닫이문 ──
+    let techBandW = 0;
+    {
+      let ty = M;
+      techKeys.forEach((k) => {
+        const spec = equipmentData[k];
+        if (ty + spec.height > H - 280) return; // 환자 밴드 침범 방지
+        const tx = techSide === "left" ? M : W - spec.width - M;
+        addEquipment(k, { left: tx, top: ty, silent: true });
+        const doorX = techSide === "left" ? tx + spec.width + 12 : tx + 12;
+        addDoor("swing_door", { left: doorX, top: ty + Math.max(20, Math.min(50, spec.height - 100)), angle: 90, silent: true });
+        techBandW = Math.max(techBandW, spec.width);
+        ty += spec.height + 10;
+      });
+    }
+
+    // ── 환자 밴드: 하단 벽을 따라 가로 배치 + 여닫이문 ──
+    let patientEndX = techSide === "left" ? techBandW + 40 : M;
+    {
+      const xMax = techSide === "right" ? W - techBandW - 40 : W - M;
+      patientKeys.forEach((k) => {
+        const spec = equipmentData[k];
+        if (patientEndX + spec.width > xMax) return;
+        addEquipment(k, { left: patientEndX, top: H - spec.height - M, silent: true });
+        addDoor("swing_door", { left: patientEndX + 20, top: H - spec.height - M - 4, silent: true });
+        patientEndX += spec.width + 10;
+      });
+    }
+
+    // ── 격리실: 기술 밴드 반대편 상단 코너 (+격리 병상) ──
+    let isoZone = null;
+    let isoBedGrp = null;
+    const placedBeds = [];
+    if (hasIso) {
+      const spec = equipmentData.isolation_room;
+      const ix = techSide === "left" ? W - spec.width - M : M;
+      addEquipment("isolation_room", { left: ix, top: M, silent: true });
+      addDoor("sliding_door", { left: ix + 60, top: M + spec.height - 4, silent: true });
+      if (placedBeds.length < target) {
+        isoBedGrp = addBedUnit(ix + 60, M + 40, true);
+        placedBeds.push({ grp: isoBedGrp, rowY: M + 40 });
+      }
+      isoZone = { left: ix, right: ix + spec.width, bottom: M + spec.height };
+    }
+
+    // ── 병상 필드: 남은 영역을 행 단위로 최대한 채움 ──
+    const fieldX0 = techSide === "left" ? techBandW + 50 : M + 30;
+    const fieldX1 = techSide === "right" ? W - techBandW - 50 : W - 30;
+    const fieldY1 = H - 280; // 환자 밴드 상단까지
+    const unitGap = MEDICAL_RULES.MIN_BED_GAP_CM + 10 + Math.floor(rng() * 6) * 10; // 변형 ②: 간격 110~160cm
+    const pitch = 175 + unitGap; // 병상 유닛 폭(175cm) + 간격
+    // 변형 ③: 통로 폭 150~250cm — 단, 목표 대수를 채우는 데 필요한 행 수가
+    // 들어가도록 상한을 적응형으로 낮춘다 (최소 150cm은 항상 보장)
+    const fieldH = fieldY1 - (M + 30);
+    const perRowEst = Math.max(1, Math.floor((fieldX1 - fieldX0 - 175) / pitch) + 1);
+    const rowsNeeded = Math.max(1, Math.ceil((target - placedBeds.length) / perRowEst));
+    const aisleMax = rowsNeeded > 1
+      ? Math.floor((fieldH - rowsNeeded * 220) / (rowsNeeded - 1) / 10) * 10
+      : 250;
+    const aisle = Math.max(150, Math.min(150 + Math.floor(rng() * 11) * 10, aisleMax));
+    const rows = [];
+    let ry = M + 30;
+    while (ry + 220 <= fieldY1 && placedBeds.length < target) {
+      let rx0 = fieldX0, rx1 = fieldX1;
+      if (isoZone && ry < isoZone.bottom + 40) { // 격리실 높이 구간은 회피
+        if (techSide === "left") rx1 = Math.min(rx1, isoZone.left - 40);
+        else rx0 = Math.max(rx0, isoZone.right + 40);
+      }
+      const row = [];
+      for (let x = rx0; x + 175 <= rx1 && placedBeds.length < target; x += pitch) {
+        const grp = addBedUnit(x, ry, false);
+        row.push(grp);
+        placedBeds.push({ grp, rowY: ry });
+      }
+      if (row.length) rows.push({ y: ry, beds: row });
+      ry += 220 + aisle;
+    }
+
+    // ── 배관: 정수실 → 세로 트렁크 → 행별 주행선 → 병상 분기 (2계통) ──
+    const wt = getObjects().find((o) => o.meta.key === "water_treatment");
+    if (wt && rows.length) {
+      const trunkX = techSide === "left" ? fieldX0 - 25 : fieldX1 + 25;
+      const lastRunY = rows[rows.length - 1].y - 18;
+      const trunk = [
+        { x: techSide === "left" ? wt.left + wt.width : wt.left, y: wt.top + 100 },
+        { x: trunkX, y: wt.top + 100 },
+        { x: trunkX, y: lastRunY },
+      ];
+      const off = techSide === "left" ? -14 : 14; // 배수 트렁크 평행 오프셋
+      addPipe(trunk, "inlet");
+      addPipe(trunk.map((p) => ({ x: p.x + off, y: p.y + 14 })), "drain");
+      rows.forEach(({ y: rowY, beds }) => {
+        const runY = rowY - 18;
+        const farX = techSide === "left"
+          ? Math.max(...beds.map((b) => b.left + b.width))
+          : Math.min(...beds.map((b) => b.left));
+        const run = [{ x: trunkX, y: runY }, { x: farX, y: runY }];
+        addPipe(run, "inlet");
+        addPipe(run.map((p) => ({ x: p.x, y: p.y + 14 })), "drain");
+        beds.forEach((b) => {
+          const px = b.left + b.width - 30;
+          addPipe([{ x: px, y: runY }, { x: px, y: rowY + 20 }], "inlet");
+        });
+      });
+      // 격리 병상 분기: 첫 행 주행선 끝에서 격리실 안까지 연장
+      if (isoBedGrp) {
+        const runY0 = rows[0].y - 18;
+        const isoPx = isoBedGrp.left + isoBedGrp.width - 30;
+        const farX = techSide === "left"
+          ? Math.max(...rows[0].beds.map((b) => b.left + b.width))
+          : Math.min(...rows[0].beds.map((b) => b.left));
+        addPipe([{ x: farX, y: runY0 }, { x: isoPx, y: runY0 },
+                 { x: isoPx, y: isoBedGrp.top + 20 }], "inlet");
+      }
+    }
+
+    // ── 주 출입구 자동문: 환자 밴드 끝 이후 하단 벽 (자리가 없으면 측벽) ──
+    if (patientEndX + 220 <= W - M) {
+      addDoor("auto_door", { left: patientEndX + 20, top: H - 4, silent: true });
+    } else {
+      const sideX = techSide === "left" ? W - 4 + 14 : M + 4;
+      addDoor("auto_door", { left: sideX, top: Math.max(M + 40, H - 500), angle: 90, silent: true });
+    }
+
+    renumberBeds(); // HD1부터 행→열 순으로 부여
+    canvas.discardActiveObject();
+    canvas.requestRenderAll();
+    endBulk();
+    return {
+      placed: placedBeds.length,
+      target,
+      variant: { techSide, aisle, unitGap },
+    };
+  }
+
   /* ───────────────── 편집 도구 (EdrawMax 스타일) ─────────────────
    * 실행취소/다시실행 · 복사/붙여넣기/복제 · 정렬/등간격 · 순서 · 반전 · 잠금 · 줌 */
 
@@ -903,7 +1085,7 @@ const FloorCanvas = (() => {
   return {
     init, newRoom, setBackgroundImage, addEquipment, addPipe, addDoor,
     groupSelection, ungroupSelection, togglePipeMode, finishPipe,
-    autoLayout, getObjects, deleteSelection, toJSON, loadJSON, exportImage,
+    autoLayout, autoModel, getObjects, deleteSelection, toJSON, loadJSON, exportImage,
     fitToScreen,
     setWallThickness, renumberBeds, renameSelected, setBlueprintMode,
     undo, redo, copySelection, pasteClipboard, duplicateSelection,

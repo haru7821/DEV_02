@@ -48,63 +48,96 @@
   </header>
 
   <div id="main-layout">
-    <!-- ───────── 좌측 에셋 툴바 ───────── -->
+    <!-- ───────── 좌측 에셋 툴바 (카테고리 클릭 시 Sub 항목 펼침) ───────── -->
     <aside id="asset-toolbar">
-      <h3>병상 / 장비</h3>
-      <div id="equipment-buttons"><!-- assets.js 데이터로 자동 생성 --></div>
-
-      <h3>부속실</h3>
-      <div id="room-buttons"><!-- assets.js 데이터로 자동 생성 --></div>
-
-      <h3>문 / 개구부</h3>
-      <div id="door-buttons"><!-- assets.js doorData로 자동 생성 --></div>
-
-      <h3>사용자 시설 추가</h3>
-      <div id="custom-asset-form">
-        <input type="text" id="custom-name" placeholder="시설 이름 (예: 회복실)" maxlength="20" />
-        <div class="custom-size-row">
-          <input type="number" id="custom-w" value="2000" min="300" step="100" title="가로(mm)" />
-          <span>×</span>
-          <input type="number" id="custom-h" value="2000" min="300" step="100" title="세로(mm)" />
-          <input type="color" id="custom-color" value="#8BC34A" title="색상" />
+      <details class="tb-section" open>
+        <summary>⚙ Auto Modeling</summary>
+        <div class="tb-body" id="auto-model-panel">
+          <div class="prop-row"><span>병상 대수</span><input type="number" id="target-beds" value="20" min="1" max="100" /></div>
+          <div id="facility-checks"><!-- 시설 체크박스 자동 생성 --></div>
+          <button id="btn-auto-model" class="tool-btn" title="누를 때마다 다른 구성의 도면이 자동 생성됩니다">⚙ Auto Modeling 실행</button>
         </div>
-        <button id="btn-add-custom" class="tool-btn">+ 시설 추가</button>
-      </div>
+      </details>
 
-      <h3>편집</h3>
-      <div class="edit-grid">
-        <button id="btn-undo" class="mini-btn" title="실행 취소 (Ctrl+Z)">↩ 취소</button>
-        <button id="btn-redo" class="mini-btn" title="다시 실행 (Ctrl+Y)">↪ 재실행</button>
-        <button id="btn-duplicate" class="mini-btn" title="복제 (Ctrl+D) — 크기 조정 상태 그대로 복제">⧉ 복제</button>
-        <button id="btn-lock" class="mini-btn" title="선택 객체 잠금/해제">🔒 잠금</button>
-        <button id="btn-flip-h" class="mini-btn" title="좌우 반전">⇋ 좌우</button>
-        <button id="btn-flip-v" class="mini-btn" title="상하 반전">⇅ 상하</button>
-        <button id="btn-front" class="mini-btn" title="맨 앞으로">▲ 앞으로</button>
-        <button id="btn-back" class="mini-btn" title="맨 뒤로">▼ 뒤로</button>
-      </div>
+      <details class="tb-section" open>
+        <summary>병상 / 장비</summary>
+        <div class="tb-body" id="equipment-buttons"><!-- assets.js 데이터로 자동 생성 --></div>
+      </details>
 
-      <h3>정렬 (다중 선택)</h3>
-      <div class="edit-grid">
-        <button id="btn-align-left" class="mini-btn" title="왼쪽 정렬">⇤ 좌</button>
-        <button id="btn-align-hcenter" class="mini-btn" title="가로 중앙 정렬">↔ 중</button>
-        <button id="btn-align-right" class="mini-btn" title="오른쪽 정렬">⇥ 우</button>
-        <button id="btn-align-top" class="mini-btn" title="위쪽 정렬">⤒ 상</button>
-        <button id="btn-align-vcenter" class="mini-btn" title="세로 중앙 정렬">↕ 중</button>
-        <button id="btn-align-bottom" class="mini-btn" title="아래쪽 정렬">⤓ 하</button>
-      </div>
-      <button id="btn-dist-h" class="tool-btn" title="3개 이상 선택 시 가로 간격을 동일하게">가로 등간격 배치</button>
-      <button id="btn-dist-v" class="tool-btn" title="3개 이상 선택 시 세로 간격을 동일하게">세로 등간격 배치</button>
+      <details class="tb-section">
+        <summary>부속실</summary>
+        <div class="tb-body" id="room-buttons"><!-- assets.js 데이터로 자동 생성 --></div>
+      </details>
 
-      <h3>도구</h3>
-      <button id="btn-group" class="tool-btn">선택 객체 그룹화</button>
-      <button id="btn-ungroup" class="tool-btn">그룹 해제</button>
-      <button id="btn-add-pipe-inlet" class="tool-btn">급수 배관 (Inlet)</button>
-      <button id="btn-add-pipe-drain" class="tool-btn">배수 배관 (Drain)</button>
-      <button id="btn-renumber" class="tool-btn">병상 번호 재정렬</button>
-      <button id="btn-delete" class="tool-btn danger">선택 삭제 (Del)</button>
+      <details class="tb-section">
+        <summary>문 / 개구부</summary>
+        <div class="tb-body" id="door-buttons"><!-- assets.js doorData로 자동 생성 --></div>
+      </details>
 
-      <h3>범례</h3>
-      <ul id="legend"><!-- assets.js 데이터로 자동 생성 --></ul>
+      <details class="tb-section">
+        <summary>사용자 시설 추가</summary>
+        <div class="tb-body" id="custom-asset-form">
+          <input type="text" id="custom-name" placeholder="시설 이름 (예: 회복실)" maxlength="20" />
+          <div class="custom-size-row">
+            <input type="number" id="custom-w" value="2000" min="300" step="100" title="가로(mm)" />
+            <span>×</span>
+            <input type="number" id="custom-h" value="2000" min="300" step="100" title="세로(mm)" />
+            <input type="color" id="custom-color" value="#8BC34A" title="색상" />
+          </div>
+          <button id="btn-add-custom" class="tool-btn">+ 시설 추가</button>
+        </div>
+      </details>
+
+      <details class="tb-section">
+        <summary>편집</summary>
+        <div class="tb-body">
+          <div class="edit-grid">
+            <button id="btn-undo" class="mini-btn" title="실행 취소 (Ctrl+Z)">↩ 취소</button>
+            <button id="btn-redo" class="mini-btn" title="다시 실행 (Ctrl+Y)">↪ 재실행</button>
+            <button id="btn-duplicate" class="mini-btn" title="복제 (Ctrl+D) — 크기 조정 상태 그대로 복제">⧉ 복제</button>
+            <button id="btn-lock" class="mini-btn" title="선택 객체 잠금/해제">🔒 잠금</button>
+            <button id="btn-flip-h" class="mini-btn" title="좌우 반전">⇋ 좌우</button>
+            <button id="btn-flip-v" class="mini-btn" title="상하 반전">⇅ 상하</button>
+            <button id="btn-front" class="mini-btn" title="맨 앞으로">▲ 앞으로</button>
+            <button id="btn-back" class="mini-btn" title="맨 뒤로">▼ 뒤로</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="tb-section">
+        <summary>정렬 (다중 선택)</summary>
+        <div class="tb-body">
+          <div class="edit-grid">
+            <button id="btn-align-left" class="mini-btn" title="왼쪽 정렬">⇤ 좌</button>
+            <button id="btn-align-hcenter" class="mini-btn" title="가로 중앙 정렬">↔ 중</button>
+            <button id="btn-align-right" class="mini-btn" title="오른쪽 정렬">⇥ 우</button>
+            <button id="btn-align-top" class="mini-btn" title="위쪽 정렬">⤒ 상</button>
+            <button id="btn-align-vcenter" class="mini-btn" title="세로 중앙 정렬">↕ 중</button>
+            <button id="btn-align-bottom" class="mini-btn" title="아래쪽 정렬">⤓ 하</button>
+          </div>
+          <button id="btn-dist-h" class="tool-btn" title="3개 이상 선택 시 가로 간격을 동일하게">가로 등간격 배치</button>
+          <button id="btn-dist-v" class="tool-btn" title="3개 이상 선택 시 세로 간격을 동일하게">세로 등간격 배치</button>
+        </div>
+      </details>
+
+      <details class="tb-section">
+        <summary>도구</summary>
+        <div class="tb-body">
+          <button id="btn-group" class="tool-btn">선택 객체 그룹화</button>
+          <button id="btn-ungroup" class="tool-btn">그룹 해제</button>
+          <button id="btn-add-pipe-inlet" class="tool-btn">급수 배관 (Inlet)</button>
+          <button id="btn-add-pipe-drain" class="tool-btn">배수 배관 (Drain)</button>
+          <button id="btn-renumber" class="tool-btn">병상 번호 재정렬</button>
+          <button id="btn-delete" class="tool-btn danger">선택 삭제 (Del)</button>
+        </div>
+      </details>
+
+      <details class="tb-section">
+        <summary>범례</summary>
+        <div class="tb-body">
+          <ul id="legend"><!-- assets.js 데이터로 자동 생성 --></ul>
+        </div>
+      </details>
     </aside>
 
     <!-- ───────── 중앙 캔버스 ───────── -->
