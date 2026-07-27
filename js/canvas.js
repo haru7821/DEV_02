@@ -9,11 +9,19 @@ const FloorCanvas = (() => {
   let room = { width: 1500, height: 1000 }; // 병실 내부 치수(cm)
   let snapSize = 10;          // 스냅 단위(cm). 0 = 끄기
   let pipeMode = false;       // 배관 그리기 모드
+  let pipeType = "inlet";     // 그리는 중인 배관 타입 ("inlet" | "drain")
   let pipePoints = [];        // 그리는 중인 배관 꼭짓점
   let pipePreview = null;     // 미리보기 라인
+  let bedCounter = 0;         // 병상 번호(HD1, HD2, …) 순차 카운터
+  let blueprintMode = false;  // 흑백 도면(청사진) 모드
 
   const GRID_STEP = 50;       // 화면에 그리는 그리드 간격(cm)
-  const WALL = 10;            // 벽 두께(cm)
+  let WALL = 10;              // 벽 두께(cm) — setWallThickness()로 변경
+
+  /** 벽 두께 설정(cm). 다음 새 도면/자동 배치부터 적용된다. */
+  function setWallThickness(t) {
+    WALL = Math.min(40, Math.max(5, Math.round(+t) || 10));
+  }
 
   /* ───────────────── 초기화 ───────────────── */
   function init(el) {
@@ -82,10 +90,12 @@ const FloorCanvas = (() => {
   /* ───────────────── 병실(도면) 생성 ───────────────── */
   function newRoom(w, h) {
     room = { width: w, height: h };
+    bedCounter = 0; // 새 도면이므로 병상 번호 초기화
     canvas.clear();
     canvas.backgroundColor = "#ffffff";
     drawGrid();
     drawWalls();
+    drawWallNote();
     fitToScreen();
   }
 
@@ -108,6 +118,17 @@ const FloorCanvas = (() => {
     });
     wall.meta = { key: "wall", label: "외벽" };
     canvas.add(wall);
+  }
+
+  /** 도면 좌측 하단(외벽 바로 아래)에 벽체 두께 주석을 표시 */
+  function drawWallNote() {
+    const note = new fabric.Text(`벽체 THK ${WALL * 10}mm`, {
+      left: -WALL, top: room.height + WALL + 8,
+      fontSize: 26, fill: "#455A64",
+      selectable: false, evented: false,
+    });
+    note.meta = { key: "annotation", label: "벽체 두께 주석" };
+    canvas.add(note);
   }
 
   function staticLine(coords, color) {
@@ -168,7 +189,18 @@ const FloorCanvas = (() => {
       const s = maxLen / text.width;
       text.set({ scaleX: s, scaleY: s });
     }
-    const grp = new fabric.Group([rect, text], {
+    const parts = [rect];
+    // 코어/샤프트(PS/EPS) 기호: 사각형 안에 대각선 X 두 줄
+    if (spec.symbol === "cross") {
+      parts.push(new fabric.Line(
+        [-spec.width / 2, -spec.height / 2, spec.width / 2, spec.height / 2],
+        { stroke: spec.color, strokeWidth: 2 }));
+      parts.push(new fabric.Line(
+        [-spec.width / 2, spec.height / 2, spec.width / 2, -spec.height / 2],
+        { stroke: spec.color, strokeWidth: 2 }));
+    }
+    parts.push(text);
+    const grp = new fabric.Group(parts, {
       left: opts.left ?? Math.round(room.width / 2 - spec.width / 2),
       top: opts.top ?? Math.round(room.height / 2 - spec.height / 2),
       angle: opts.angle ?? 0,
@@ -181,8 +213,86 @@ const FloorCanvas = (() => {
       isolationCapable: !!spec.isolationCapable,
     };
     canvas.add(grp);
+    // 투석 침대 단독 추가 시 HD 번호 부여 (병상 유닛 내부 침대는 제외)
+    if (key === "dialysis_bed" && !opts.inUnit) assignBedNumber(grp);
+    applyBlueprintToObject(grp);
     if (!opts.silent) { canvas.setActiveObject(grp); canvas.requestRenderAll(); }
     return grp;
+  }
+
+  /* ───────────────── 병상 번호 (HD1, HD2, …) ───────────────── */
+  /** 병상 번호 배지 텍스트 생성 (그룹 좌측 상단, 굵은 초록색) */
+  function makeBedBadge(name, left, top) {
+    const badge = new fabric.Text(name, {
+      left, top, fontSize: 28, fontWeight: "bold", fill: "#1B5E20",
+    });
+    badge.meta = { key: "bed_badge" };
+    return badge;
+  }
+
+  /** 병상 그룹에 순차 HD 번호를 부여하고 배지를 그룹에 포함 */
+  function assignBedNumber(grp) {
+    bedCounter += 1;
+    const name = "HD" + bedCounter;
+    grp.meta.name = name;
+    grp.addWithUpdate(makeBedBadge(name, grp.left + 4, grp.top + 2));
+    applyBlueprintToObject(grp); // 도면 모드 중이면 배지도 흑백 반영
+    return name;
+  }
+
+  /** 그룹 안의 번호 배지 텍스트 찾기 */
+  function findBedBadge(grp) {
+    if (!grp.getObjects) return null;
+    return grp.getObjects().find((c) => c.meta && c.meta.key === "bed_badge") ?? null;
+  }
+
+  function isBedObject(o) {
+    return o.meta && ["dialysis_bed", "bed_unit"].includes(o.meta.key);
+  }
+
+  /**
+   * 병상 번호 재정렬: (top 200cm 단위 행 → left 오름차순) 순서로
+   * HD1부터 다시 부여하고 배지 텍스트를 갱신한다.
+   */
+  function renumberBeds() {
+    const beds = getObjects().filter(isBedObject);
+    beds.sort((a, b) => {
+      const rowA = Math.floor(a.top / 200), rowB = Math.floor(b.top / 200);
+      return rowA !== rowB ? rowA - rowB : a.left - b.left;
+    });
+    bedCounter = 0;
+    beds.forEach((b) => {
+      bedCounter += 1;
+      b.meta.name = "HD" + bedCounter;
+      const badge = findBedBadge(b);
+      if (badge) { badge.set("text", b.meta.name); b.addWithUpdate(); }
+      else b.addWithUpdate(makeBedBadge(b.meta.name, b.left + 4, b.top + 2)); // 배지가 없으면 새로 부착
+    });
+    canvas.requestRenderAll();
+    return beds.length;
+  }
+
+  /**
+   * 선택 객체 이름 변경.
+   * 병상(dialysis_bed / bed_unit)은 meta.name(HD 번호)을 우선 갱신하고
+   * 배지 텍스트를 다시 그린다. 그 외 객체는 meta.label + 내부 라벨 텍스트 갱신.
+   */
+  function renameSelected(name) {
+    const o = canvas.getActiveObject();
+    if (!o || !o.meta || !name) return false;
+    if (isBedObject(o)) {
+      o.meta.name = name;
+      const badge = findBedBadge(o);
+      if (badge) { badge.set("text", name); o.addWithUpdate(); }
+    } else {
+      o.meta.label = name;
+      if (o.getObjects) {
+        const txt = o.getObjects().find((c) => c.type === "text" && (!c.meta || c.meta.key !== "bed_badge"));
+        if (txt) { txt.set("text", name); o.addWithUpdate(); }
+      }
+    }
+    canvas.requestRenderAll();
+    return true;
   }
 
   /* ───────────────── 그룹화 / 해제 ───────────────── */
@@ -210,10 +320,16 @@ const FloorCanvas = (() => {
     return true;
   }
 
-  /* ───────────────── 정수 배관 그리기 ───────────────── */
-  function togglePipeMode() {
-    pipeMode = !pipeMode;
-    if (!pipeMode) finishPipe();
+  /* ───────────────── 배관 그리기 (급수/배수) ───────────────── */
+  /** 배관 그리기 모드 토글. 같은 타입을 다시 누르면 종료, 다른 타입이면 전환. */
+  function togglePipeMode(type = "inlet") {
+    if (pipeMode && pipeType === type) {
+      finishPipe(); // pipeMode = false 처리 포함
+    } else {
+      if (pipeMode) finishPipe(); // 그리던 다른 타입 배관은 완료 처리
+      pipeMode = true;
+      pipeType = type;
+    }
     canvas.defaultCursor = pipeMode ? "crosshair" : "default";
     return pipeMode;
   }
@@ -228,8 +344,11 @@ const FloorCanvas = (() => {
 
   function drawPipePreview(cursor) {
     if (pipePreview) canvas.remove(pipePreview);
+    const spec = pipeTypes[pipeType] ?? pipeTypes.inlet;
     pipePreview = new fabric.Polyline([...pipePoints, cursor], {
-      fill: "", stroke: "#9C27B0", strokeWidth: 6, strokeDashArray: [15, 10],
+      // 미리보기는 해당 배관 색상, 실선 타입도 점선으로 표시해 '작성 중'임을 구분
+      fill: "", stroke: spec.color, strokeWidth: 6,
+      strokeDashArray: spec.dash ? [...spec.dash] : [15, 10],
       selectable: false, evented: false,
     });
     canvas.add(pipePreview);
@@ -238,19 +357,28 @@ const FloorCanvas = (() => {
 
   function finishPipe() {
     if (pipePreview) { canvas.remove(pipePreview); pipePreview = null; }
-    if (pipePoints.length >= 2) addPipe(pipePoints);
+    if (pipePoints.length >= 2) addPipe(pipePoints, pipeType);
     pipePoints = [];
     pipeMode = false;
     canvas.defaultCursor = "default";
   }
 
-  function addPipe(points) {
-    const pipe = new fabric.Polyline(points, {
-      fill: "", stroke: "#9C27B0", strokeWidth: 6, strokeDashArray: [15, 10],
+  /** 배관 추가 — 급수(inlet, 파란 실선) / 배수(drain, 갈색 점선) */
+  function addPipe(points, type = "inlet") {
+    const spec = pipeTypes[type] ?? pipeTypes.inlet;
+    const line = new fabric.Polyline(points.map((p) => ({ x: p.x, y: p.y })), {
+      fill: "", stroke: spec.color, strokeWidth: 6,
+      strokeDashArray: spec.dash ? [...spec.dash] : null,
     });
-    pipe.meta = { key: "pipe", label: "정수 배관" };
-    canvas.add(pipe);
-    return pipe;
+    // 시작점 옆 소형 라벨 (IN / DR) — 배관과 한 그룹으로 묶어 함께 이동
+    const tag = new fabric.Text(type === "drain" ? "DR" : "IN", {
+      fontSize: 16, fontWeight: "bold", fill: spec.color,
+      left: points[0].x + 6, top: points[0].y - 24,
+    });
+    const grp = new fabric.Group([line, tag]);
+    grp.meta = { key: "pipe", pipeType: type, label: spec.label };
+    canvas.add(grp);
+    return grp;
   }
 
   /* ───────────────── 문(개구부) 추가 ─────────────────
@@ -318,6 +446,7 @@ const FloorCanvas = (() => {
     });
     grp.meta = { key, label: spec.label, isDoor: true };
     canvas.add(grp);
+    applyBlueprintToObject(grp);
     if (!opts.silent) { canvas.setActiveObject(grp); canvas.requestRenderAll(); }
     return grp;
   }
@@ -394,9 +523,10 @@ const FloorCanvas = (() => {
     return beds;
   }
 
-  /** 침대 + 투석기 + 모니터를 하나의 유닛 그룹으로 생성 */
+  /** 침대 + 투석기 + 모니터를 하나의 유닛 그룹으로 생성 (HD 번호 자동 부여) */
   function addBedUnit(x, y, isolated) {
-    const bed = addEquipment("dialysis_bed", { left: x, top: y, silent: true });
+    // 침대는 유닛 내부이므로 inUnit으로 단독 HD 번호 부여를 건너뛰고, 유닛에 번호를 준다
+    const bed = addEquipment("dialysis_bed", { left: x, top: y, silent: true, inUnit: true });
     const machine = addEquipment("dialysis_machine", { left: x + 125, top: y, silent: true });
     const monitor = addEquipment("patient_monitor", { left: x + 125, top: y + 80, silent: true });
     const sel = new fabric.ActiveSelection([bed, machine, monitor], { canvas });
@@ -409,6 +539,7 @@ const FloorCanvas = (() => {
       isolated,
       members: ["dialysis_bed", "dialysis_machine", "patient_monitor"],
     };
+    assignBedNumber(grp);
     canvas.requestRenderAll();
     return grp;
   }
@@ -416,31 +547,83 @@ const FloorCanvas = (() => {
   function drawPipeRuns(topBeds, bottomBeds, bottomRowY) {
     const wt = getObjects().find((o) => o.meta.key === "water_treatment");
     if (!wt || !topBeds.length) return;
+    const DRAIN_OFF = 14; // 급수 주행선에서 y로 평행 이동한 배수 주행선 간격(cm)
+    const drainOf = (pts) => pts.map((p) => ({ x: p.x, y: p.y + DRAIN_OFF })); // 배수 평행선 좌표
     const runY = 20; // 상단 벽을 따라 주행하는 메인 배관 높이
     const startX = wt.left + wt.width;
     const endX = topBeds[topBeds.length - 1].left + topBeds[topBeds.length - 1].width;
-    addPipe([{ x: startX, y: wt.top + 100 }, { x: startX + 20, y: wt.top + 100 },
-             { x: startX + 20, y: runY }, { x: endX, y: runY }]);
+    // 상단 주행선: 급수(파란 실선) + 평행 배수(갈색 점선) 2계통
+    const run1 = [{ x: startX, y: wt.top + 100 }, { x: startX + 20, y: wt.top + 100 },
+                  { x: startX + 20, y: runY }, { x: endX, y: runY }];
+    addPipe(run1, "inlet");
+    addPipe(drainOf(run1), "drain");
     topBeds.forEach((b) => {
       const px = b.left + b.width - 30;
-      addPipe([{ x: px, y: runY }, { x: px, y: b.top + 20 }]);
+      addPipe([{ x: px, y: runY }, { x: px, y: b.top + 20 }], "inlet");
     });
     if (bottomBeds.length) {
       const dropX = startX + 20;
       const runY2 = bottomRowY - 20;
       const endX2 = bottomBeds[bottomBeds.length - 1].left + bottomBeds[bottomBeds.length - 1].width;
-      addPipe([{ x: dropX, y: runY }, { x: dropX, y: runY2 }, { x: endX2, y: runY2 }]);
+      const run2 = [{ x: dropX, y: runY }, { x: dropX, y: runY2 }, { x: endX2, y: runY2 }];
+      addPipe(run2, "inlet");
+      addPipe(drainOf(run2), "drain");
       bottomBeds.forEach((b) => {
         const px = b.left + b.width - 30;
-        addPipe([{ x: px, y: runY2 }, { x: px, y: b.top + 20 }]);
+        addPipe([{ x: px, y: runY2 }, { x: px, y: b.top + 20 }], "inlet");
       });
     }
   }
 
+  /* ───────────────── 흑백 도면(청사진) 모드 ─────────────────
+   * 배치 객체를 건축 도면 스타일(흰 바탕 + 검정 선/글자)로 전환한다.
+   * 최초 전환 시 _origFill/_origStroke에 원래 색을 저장해 복원에 사용.
+   * 배관(급수/배수)은 계통 구분이 필요하므로 원래 색을 유지한다. */
+  function eachNode(o, fn) {
+    fn(o);
+    if (o.getObjects) o.getObjects().forEach((c) => eachNode(c, fn));
+  }
+
+  function paintBlueprintNode(node) {
+    if (node._origFill === undefined) node._origFill = node.fill ?? null;
+    if (node._origStroke === undefined) node._origStroke = node.stroke ?? null;
+    if (node.type === "text") {
+      node.set("fill", "#000000");
+    } else if (node.type !== "group") {
+      if (node.fill && node.fill !== "transparent") node.set("fill", "#ffffff");
+      if (node.stroke) node.set("stroke", "#000000");
+    }
+    node.dirty = true;
+  }
+
+  function restoreNode(node) {
+    if (node._origFill !== undefined) node.set("fill", node._origFill);
+    if (node._origStroke !== undefined) node.set("stroke", node._origStroke);
+    node.dirty = true;
+  }
+
+  /** 개별 객체에 현재 도면 모드를 반영 (새로 추가되는 객체용) */
+  function applyBlueprintToObject(o) {
+    if (!blueprintMode) return;
+    if (o.meta && o.meta.key === "pipe") return; // 배관은 원래 색 유지
+    eachNode(o, paintBlueprintNode);
+  }
+
+  /** 흑백 도면 모드 켜기/끄기 */
+  function setBlueprintMode(on) {
+    blueprintMode = !!on;
+    getObjects().forEach((o) => {
+      if (o.meta && o.meta.key === "pipe") return; // 배관은 원래 색 유지
+      eachNode(o, blueprintMode ? paintBlueprintNode : restoreNode);
+    });
+    canvas.requestRenderAll();
+    return blueprintMode;
+  }
+
   /* ───────────────── 조회/직렬화 유틸 ───────────────── */
-  /** 그리드·벽을 제외한 배치 객체 목록 */
+  /** 그리드·벽·주석을 제외한 배치 객체 목록 */
   function getObjects() {
-    return canvas.getObjects().filter((o) => o.meta && !["grid", "wall"].includes(o.meta.key));
+    return canvas.getObjects().filter((o) => o.meta && !["grid", "wall", "annotation"].includes(o.meta.key));
   }
 
   function deleteSelection() {
@@ -461,6 +644,11 @@ const FloorCanvas = (() => {
   function loadJSON(data, done) {
     room = data.room;
     canvas.loadFromJSON(data.canvas, () => {
+      // 불러온 도면의 HD 번호 최댓값에서 병상 카운터를 이어간다
+      bedCounter = canvas.getObjects().reduce((max, o) => {
+        const m = o.meta && typeof o.meta.name === "string" && o.meta.name.match(/^HD(\d+)$/);
+        return m ? Math.max(max, +m[1]) : max;
+      }, 0);
       fitToScreen();
       canvas.requestRenderAll();
       if (done) done();
@@ -485,6 +673,7 @@ const FloorCanvas = (() => {
     groupSelection, ungroupSelection, togglePipeMode, finishPipe,
     autoLayout, getObjects, deleteSelection, toJSON, loadJSON, exportImage,
     fitToScreen,
+    setWallThickness, renumberBeds, renameSelected, setBlueprintMode,
     setSnap: (s) => { snapSize = s; },
     getRoom: () => room,
     getCanvas: () => canvas,

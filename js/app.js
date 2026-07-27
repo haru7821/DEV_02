@@ -43,6 +43,12 @@
       $("door-buttons").appendChild(makeAssetButton(spec, `폭 ${spec.width}`,
         () => FloorCanvas.addDoor(key)));
     });
+    // 배관 2계통(급수/배수) 범례 — 색상 견본 포함
+    Object.values(pipeTypes).forEach((spec) => {
+      const li = document.createElement("li");
+      li.innerHTML = `<span class="asset-swatch" style="background:${spec.color}"></span>${spec.label}`;
+      $("legend").appendChild(li);
+    });
   }
 
   /** 사용자 정의 시설을 카탈로그에 등록하고 툴바 버튼을 생성 */
@@ -74,7 +80,8 @@
       if (!o || !o.meta) { $("prop-form").hidden = true; $("prop-empty").hidden = false; return; }
       $("prop-form").hidden = false;
       $("prop-empty").hidden = true;
-      $("prop-name").value = o.meta.label ?? o.meta.key;
+      // 병상은 HD 번호(meta.name)를 우선 표시 — 이름 입력으로 번호 수정 가능
+      $("prop-name").value = o.meta.name ?? o.meta.label ?? o.meta.key;
       $("prop-x").value = Math.round(o.left);
       $("prop-y").value = Math.round(o.top);
       $("prop-w").value = Math.round(o.getScaledWidth());
@@ -102,16 +109,27 @@
     ["prop-x", "prop-y", "prop-w", "prop-h", "prop-angle"].forEach((id) =>
       $(id).addEventListener("change", apply)
     );
+
+    // 이름 변경: 병상은 HD 번호, 그 외는 라벨(그룹 내부 텍스트 포함) 갱신
+    $("prop-name").addEventListener("change", () => {
+      const name = $("prop-name").value.trim();
+      if (name) FloorCanvas.renameSelected(name);
+    });
   }
 
   /* ───────── 검증 실행 + 결과 리포트 ───────── */
   function runValidation() {
     const canvas = FloorCanvas.getCanvas();
-    const result = Validator.run(canvas, FloorCanvas.getObjects());
+    const result = Validator.run(canvas, FloorCanvas.getObjects(), FloorCanvas.getRoom());
     const report = $("validation-report");
     const lines = [];
 
     lines.push(`병상 수: <b>${result.spacing.bedCount}</b>개`);
+    if (result.area) {
+      lines.push(result.area.ok
+        ? `<span class="ok">✔ 병상당 면적 ${result.area.perBed}m² (권고 ${MEDICAL_RULES.AREA_PER_BED_M2}m² 이상)</span>`
+        : `<span class="error">✖ 병상당 면적 ${result.area.perBed}m² &lt; 권고 ${MEDICAL_RULES.AREA_PER_BED_M2}m²</span>`);
+    }
     if (result.spacing.violations.length) {
       lines.push(`<span class="error">✖ 병상 간격 위반 ${result.spacing.violations.length}건</span>`);
       lines.push("<ul>" + result.spacing.violations.map((v) =>
@@ -221,6 +239,7 @@
     $("btn-new-room").addEventListener("click", () => {
       const w = +$("room-width").value, h = +$("room-height").value;
       if (w < 300 || h < 300) return toast("병실 크기는 최소 3m × 3m 이상이어야 합니다.");
+      FloorCanvas.setWallThickness(+$("wall-thickness").value);
       FloorCanvas.newRoom(w, h);
       $("validation-report").textContent = "아직 검증하지 않았습니다.";
     });
@@ -231,6 +250,7 @@
     });
     $("snap-size").addEventListener("change", (e) => FloorCanvas.setSnap(+e.target.value));
     $("btn-auto-layout").addEventListener("click", () => {
+      FloorCanvas.setWallThickness(+$("wall-thickness").value);
       // 배경 도면 사진이 있으면 사진 크기를 유지, 없으면 입력값으로 새 도면 생성
       if (!FloorCanvas.getCanvas().backgroundImage) {
         const w = +$("room-width").value, h = +$("room-height").value;
@@ -238,7 +258,7 @@
         FloorCanvas.newRoom(w, h);
       }
       const { beds } = FloorCanvas.autoLayout();
-      toast(`자동 배치 완료: 병상 ${beds}개 + 부속실 + 정수 배관.\n'검증' 버튼으로 규격을 확인하세요.`, "info", 5000);
+      toast(`자동 배치 완료: 병상 ${beds}개 + 부속실 + 급수/배수 배관.\n'검증' 버튼으로 규격을 확인하세요.`, "info", 5000);
     });
     $("btn-validate").addEventListener("click", runValidation);
     $("btn-save-json").addEventListener("click", saveJSON);
@@ -249,15 +269,43 @@
     });
     $("btn-export-pdf").addEventListener("click", exportPDF);
 
+    // 흑백 도면(청사진) 모드 토글
+    let blueprintOn = false;
+    $("btn-blueprint").addEventListener("click", (e) => {
+      blueprintOn = FloorCanvas.setBlueprintMode(!blueprintOn);
+      e.target.classList.toggle("active", blueprintOn);
+      toast(blueprintOn ? "도면 모드: 흑백 건축 도면 스타일로 표시합니다. (배관 색상은 유지)"
+                        : "도면 모드를 해제하고 원래 색상으로 복원했습니다.", "info");
+    });
+
     // 좌측 도구
     $("btn-group").addEventListener("click", () =>
       FloorCanvas.groupSelection() || toast("먼저 Shift 클릭으로 두 개 이상 객체를 선택하세요."));
     $("btn-ungroup").addEventListener("click", () =>
       FloorCanvas.ungroupSelection() || toast("해제할 그룹을 선택하세요."));
-    $("btn-add-pipe").addEventListener("click", (e) => {
-      const on = FloorCanvas.togglePipeMode();
-      e.target.textContent = on ? "배관 그리기 종료 (더블클릭)" : "정수 배관 그리기";
-      if (on) toast("캔버스를 클릭해 배관 경로를 찍고, 더블클릭으로 완료하세요.", "info");
+
+    // 배관 그리기 버튼 (급수/배수) — 켜진 버튼만 종료 안내 문구로 전환
+    const PIPE_BUTTONS = {
+      "btn-add-pipe-inlet": { type: "inlet", label: "급수 배관 (Inlet)" },
+      "btn-add-pipe-drain": { type: "drain", label: "배수 배관 (Drain)" },
+    };
+    const resetPipeButtons = () =>
+      Object.entries(PIPE_BUTTONS).forEach(([id, b]) => { $(id).textContent = b.label; });
+    Object.entries(PIPE_BUTTONS).forEach(([id, b]) => {
+      $(id).addEventListener("click", () => {
+        const on = FloorCanvas.togglePipeMode(b.type);
+        resetPipeButtons();
+        if (on) {
+          $(id).textContent = "배관 그리기 종료 (더블클릭)";
+          toast(`캔버스를 클릭해 ${b.label} 경로를 찍고, 더블클릭으로 완료하세요.`, "info");
+        }
+      });
+    });
+
+    $("btn-renumber").addEventListener("click", () => {
+      const n = FloorCanvas.renumberBeds();
+      if (!n) return toast("재정렬할 병상이 없습니다.");
+      toast(`병상 ${n}개의 번호를 HD1부터 다시 부여했습니다.`, "info");
     });
     $("btn-delete").addEventListener("click", FloorCanvas.deleteSelection);
     $("btn-add-custom").addEventListener("click", addCustomAsset);
@@ -268,7 +316,7 @@
       if (e.key === "Delete" || e.key === "Backspace") FloorCanvas.deleteSelection();
       if (e.key === "Escape") {
         FloorCanvas.finishPipe();
-        $("btn-add-pipe").textContent = "정수 배관 그리기";
+        resetPipeButtons();
       }
     });
   });

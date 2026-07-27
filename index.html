@@ -18,6 +18,7 @@
     <div class="nav-group">
       <label>가로(cm) <input type="number" id="room-width" value="1500" min="300" step="10" /></label>
       <label>세로(cm) <input type="number" id="room-height" value="1000" min="300" step="10" /></label>
+      <label>벽두께(cm) <input type="number" id="wall-thickness" value="10" min="5" max="40" /></label>
       <button id="btn-new-room" title="입력한 크기로 병실 외곽을 새로 그립니다">새 도면</button>
       <button id="btn-load-image" title="기존 도면 사진을 배경으로 불러옵니다">도면 사진 불러오기</button>
       <input type="file" id="image-file-input" accept="image/*" hidden />
@@ -39,6 +40,7 @@
       <button id="btn-save-json">JSON 저장</button>
       <button id="btn-load-json">JSON 열기</button>
       <input type="file" id="json-file-input" accept=".json" hidden />
+      <button id="btn-blueprint" title="흑백 건축 도면(청사진) 스타일로 전환합니다">도면 모드</button>
       <button id="btn-export-pdf" class="primary">PDF 출력 (가로)</button>
     </div>
   </header>
@@ -70,7 +72,9 @@
       <h3>도구</h3>
       <button id="btn-group" class="tool-btn">선택 객체 그룹화</button>
       <button id="btn-ungroup" class="tool-btn">그룹 해제</button>
-      <button id="btn-add-pipe" class="tool-btn">정수 배관 그리기</button>
+      <button id="btn-add-pipe-inlet" class="tool-btn">급수 배관 (Inlet)</button>
+      <button id="btn-add-pipe-drain" class="tool-btn">배수 배관 (Drain)</button>
+      <button id="btn-renumber" class="tool-btn">병상 번호 재정렬</button>
       <button id="btn-delete" class="tool-btn danger">선택 삭제 (Del)</button>
 
       <h3>범례</h3>
@@ -88,7 +92,7 @@
       <h3>속성</h3>
       <div id="prop-empty">객체를 선택하세요</div>
       <div id="prop-form" hidden>
-        <div class="prop-row"><span>이름</span><input type="text" id="prop-name" readonly /></div>
+        <div class="prop-row"><span>이름</span><input type="text" id="prop-name" /></div>
         <div class="prop-row"><span>X (cm)</span><input type="number" id="prop-x" step="10" /></div>
         <div class="prop-row"><span>Y (cm)</span><input type="number" id="prop-y" step="10" /></div>
         <div class="prop-row"><span>가로 (cm)</span><input type="number" id="prop-w" step="10" /></div>

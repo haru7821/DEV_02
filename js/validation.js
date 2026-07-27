@@ -126,19 +126,33 @@ const Validator = (() => {
     setTimeout(() => stopBlink(canvas), 6000);
   }
 
+  /* ───────── ④ 병상당 면적 검증 (권고안 6m²) ─────────
+   * 전체 바닥 면적 기준의 근사치 — 권고안의 정확한 기준은 간호사실·창고 등을
+   * 제외한 환자 점유 공간이므로, 전체 면적으로도 미달이면 확실한 위반이다. */
+  function checkAreaPerBed(room, bedCount) {
+    if (!bedCount) return null;
+    const totalM2 = (room.width / 100) * (room.height / 100);
+    const perBed = totalM2 / bedCount;
+    return { perBed: Math.round(perBed * 10) / 10, ok: perBed >= MEDICAL_RULES.AREA_PER_BED_M2 };
+  }
+
   /* ───────── 전체 실행 ───────── */
-  function run(canvas, objects) {
+  function run(canvas, objects, room) {
     stopBlink(canvas);
     const spacing = checkBedSpacing(objects);
     const water = checkWaterRuns(objects);
     const missing = checkRequiredRooms(objects);
+    const area = room ? checkAreaPerBed(room, spacing.bedCount) : null;
 
     const badObjects = new Set();
     spacing.violations.forEach((v) => { badObjects.add(v.a); badObjects.add(v.b); });
     water.forEach((w) => w.targets.forEach((t) => badObjects.add(t)));
     if (badObjects.size) startBlink(canvas, [...badObjects]);
 
-    return { spacing, water, missing, pass: !spacing.violations.length && !water.length && !missing.length };
+    return {
+      spacing, water, missing, area,
+      pass: !spacing.violations.length && !water.length && !missing.length && (!area || area.ok),
+    };
   }
 
   return { run, rectGap, stopBlink };
