@@ -4,6 +4,10 @@
 (() => {
   const $ = (id) => document.getElementById(id);
 
+  /* 단위 변환: 내부 모델은 1px = 1cm, 화면 표기는 모두 mm */
+  const toMM = (cm) => Math.round(cm * 10);
+  const toCM = (mm) => mm / 10;
+
   /* ───────── 토스트 알림 ───────── */
   let toastTimer = null;
   function toast(msg, type = "error", ms = 4000) {
@@ -29,7 +33,7 @@
 
   function addEquipmentButton(key, spec) {
     const target = spec.type === "room" ? $("room-buttons") : $("equipment-buttons");
-    target.appendChild(makeAssetButton(spec, `${spec.width}×${spec.height}`,
+    target.appendChild(makeAssetButton(spec, `${toMM(spec.width)}×${toMM(spec.height)}`,
       () => FloorCanvas.addEquipment(key)));
 
     const li = document.createElement("li");
@@ -40,7 +44,7 @@
   function buildToolbar() {
     Object.entries(equipmentData).forEach(([key, spec]) => addEquipmentButton(key, spec));
     Object.entries(doorData).forEach(([key, spec]) => {
-      $("door-buttons").appendChild(makeAssetButton(spec, `폭 ${spec.width}`,
+      $("door-buttons").appendChild(makeAssetButton(spec, `폭 ${toMM(spec.width)}`,
         () => FloorCanvas.addDoor(key)));
     });
     // 배관 2계통(급수/배수) 범례 — 색상 견본 포함
@@ -61,9 +65,9 @@
 
   function addCustomAsset() {
     const name = $("custom-name").value.trim();
-    const w = +$("custom-w").value, h = +$("custom-h").value;
+    const w = toCM(+$("custom-w").value), h = toCM(+$("custom-h").value); // 입력은 mm
     if (!name) return toast("시설 이름을 입력하세요.");
-    if (!(w >= 30 && h >= 30)) return toast("시설 크기는 30cm 이상이어야 합니다.");
+    if (!(w >= 30 && h >= 30)) return toast("시설 크기는 300mm 이상이어야 합니다.");
     const key = "custom_" + Date.now();
     registerCustomAsset(key, {
       label: name, width: w, height: h,
@@ -82,10 +86,10 @@
       $("prop-empty").hidden = true;
       // 병상은 HD 번호(meta.name)를 우선 표시 — 이름 입력으로 번호 수정 가능
       $("prop-name").value = o.meta.name ?? o.meta.label ?? o.meta.key;
-      $("prop-x").value = Math.round(o.left);
-      $("prop-y").value = Math.round(o.top);
-      $("prop-w").value = Math.round(o.getScaledWidth());
-      $("prop-h").value = Math.round(o.getScaledHeight());
+      $("prop-x").value = toMM(o.left);
+      $("prop-y").value = toMM(o.top);
+      $("prop-w").value = toMM(o.getScaledWidth());
+      $("prop-h").value = toMM(o.getScaledHeight());
       $("prop-angle").value = Math.round(o.angle);
       $("prop-water").textContent = o.meta.requiresWater ? "예 (RO 배관 필수)" : "아니오";
     };
@@ -99,8 +103,11 @@
     const apply = () => {
       const o = canvas.getActiveObject();
       if (!o) return;
-      o.set({ left: +$("prop-x").value, top: +$("prop-y").value, angle: +$("prop-angle").value });
-      const w = +$("prop-w").value, h = +$("prop-h").value;
+      o.set({
+        left: toCM(+$("prop-x").value), top: toCM(+$("prop-y").value),
+        angle: +$("prop-angle").value,
+      });
+      const w = toCM(+$("prop-w").value), h = toCM(+$("prop-h").value);
       if (w > 0) o.set("scaleX", w / o.width);
       if (h > 0) o.set("scaleY", h / o.height);
       o.setCoords();
@@ -133,9 +140,9 @@
     if (result.spacing.violations.length) {
       lines.push(`<span class="error">✖ 병상 간격 위반 ${result.spacing.violations.length}건</span>`);
       lines.push("<ul>" + result.spacing.violations.map((v) =>
-        `<li>간격 ${v.gap}cm &lt; 기준 ${MEDICAL_RULES.MIN_BED_GAP_CM}cm</li>`).join("") + "</ul>");
+        `<li>간격 ${toMM(v.gap)}mm &lt; 기준 ${toMM(MEDICAL_RULES.MIN_BED_GAP_CM)}mm</li>`).join("") + "</ul>");
     } else if (result.spacing.bedCount >= 2) {
-      lines.push(`<span class="ok">✔ 모든 병상 간격 ${MEDICAL_RULES.MIN_BED_GAP_CM}cm 이상</span>`);
+      lines.push(`<span class="ok">✔ 모든 병상 간격 ${toMM(MEDICAL_RULES.MIN_BED_GAP_CM)}mm 이상</span>`);
     }
 
     if (result.water.length) {
@@ -174,7 +181,7 @@
     pdf.setFontSize(14);
     pdf.text("Hemodialysis Unit Floor Plan", margin, margin);
     pdf.setFontSize(9);
-    pdf.text(`Room: ${room.width / 100}m x ${room.height / 100}m   Scale: fit-to-page   Date: ${new Date().toISOString().slice(0, 10)}`,
+    pdf.text(`Room: ${toMM(room.width).toLocaleString()} x ${toMM(room.height).toLocaleString()} mm   Scale: fit-to-page   Date: ${new Date().toISOString().slice(0, 10)}`,
       margin, margin + 6);
     pdf.setLineWidth(0.4);
     pdf.line(margin, margin + 9, pageW - margin, margin + 9);
@@ -219,11 +226,11 @@
 
   /* ───────── 도면 사진 배경 불러오기 ───────── */
   function loadImageFile(file) {
-    const realW = prompt("도면 사진의 실제 가로 길이를 cm로 입력하세요.\n(예: 15m → 1500)", "1500");
+    const realW = prompt("도면 사진의 실제 가로 길이를 mm로 입력하세요.\n(예: 15m → 15000)", "15000");
     if (!realW || isNaN(+realW)) return;
     const reader = new FileReader();
     reader.onload = () => {
-      FloorCanvas.setBackgroundImage(reader.result, +realW);
+      FloorCanvas.setBackgroundImage(reader.result, toCM(+realW));
       toast("도면 사진을 배경으로 설정했습니다. 사진 위에 장비를 배치하세요.", "info");
     };
     reader.readAsDataURL(file);
@@ -237,9 +244,9 @@
 
     // 상단 네비게이션
     $("btn-new-room").addEventListener("click", () => {
-      const w = +$("room-width").value, h = +$("room-height").value;
-      if (w < 300 || h < 300) return toast("병실 크기는 최소 3m × 3m 이상이어야 합니다.");
-      FloorCanvas.setWallThickness(+$("wall-thickness").value);
+      const w = toCM(+$("room-width").value), h = toCM(+$("room-height").value); // 입력은 mm
+      if (w < 300 || h < 300) return toast("병실 크기는 최소 3,000mm × 3,000mm 이상이어야 합니다.");
+      FloorCanvas.setWallThickness(toCM(+$("wall-thickness").value));
       FloorCanvas.newRoom(w, h);
       $("validation-report").textContent = "아직 검증하지 않았습니다.";
     });
@@ -250,11 +257,11 @@
     });
     $("snap-size").addEventListener("change", (e) => FloorCanvas.setSnap(+e.target.value));
     $("btn-auto-layout").addEventListener("click", () => {
-      FloorCanvas.setWallThickness(+$("wall-thickness").value);
-      // 배경 도면 사진이 있으면 사진 크기를 유지, 없으면 입력값으로 새 도면 생성
+      FloorCanvas.setWallThickness(toCM(+$("wall-thickness").value));
+      // 배경 도면 사진이 있으면 사진 크기를 유지, 없으면 입력값(mm)으로 새 도면 생성
       if (!FloorCanvas.getCanvas().backgroundImage) {
-        const w = +$("room-width").value, h = +$("room-height").value;
-        if (w < 300 || h < 300) return toast("병실 크기는 최소 3m × 3m 이상이어야 합니다.");
+        const w = toCM(+$("room-width").value), h = toCM(+$("room-height").value);
+        if (w < 300 || h < 300) return toast("병실 크기는 최소 3,000mm × 3,000mm 이상이어야 합니다.");
         FloorCanvas.newRoom(w, h);
       }
       const { beds } = FloorCanvas.autoLayout();

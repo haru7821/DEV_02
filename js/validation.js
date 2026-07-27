@@ -66,7 +66,7 @@ const Validator = (() => {
       // 거리 초과: 정수실과의 직선 동선이 기준을 넘는 경우
       const dist = Math.hypot(eqBox.cx - wtBox.cx, eqBox.cy - wtBox.cy);
       if (dist > MEDICAL_RULES.MAX_PIPE_RUN_CM) {
-        warnings.push({ msg: `「${eq.meta.label}」이(가) 정수실에서 ${(dist / 100).toFixed(1)}m 떨어져 있습니다 (기준 ${MEDICAL_RULES.MAX_PIPE_RUN_CM / 100}m).`, targets: [eq] });
+        warnings.push({ msg: `「${eq.meta.label}」이(가) 정수실에서 ${Math.round(dist * 10).toLocaleString()}mm 떨어져 있습니다 (기준 ${(MEDICAL_RULES.MAX_PIPE_RUN_CM * 10).toLocaleString()}mm).`, targets: [eq] });
       }
       // 시각적 단절: 장비 주변 100cm 이내를 지나는 배관이 없는 경우
       if (pipes.length && !pipes.some((p) => rectGap(eqBox, bbox(p)) <= 100)) {

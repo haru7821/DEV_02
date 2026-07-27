@@ -16,9 +16,9 @@
     <div class="nav-title">🏥 인공신장실 도면 에디터</div>
 
     <div class="nav-group">
-      <label>가로(cm) <input type="number" id="room-width" value="1500" min="300" step="10" /></label>
-      <label>세로(cm) <input type="number" id="room-height" value="1000" min="300" step="10" /></label>
-      <label>벽두께(cm) <input type="number" id="wall-thickness" value="10" min="5" max="40" /></label>
+      <label>가로(mm) <input type="number" id="room-width" value="15000" min="3000" step="100" /></label>
+      <label>세로(mm) <input type="number" id="room-height" value="10000" min="3000" step="100" /></label>
+      <label>벽두께(mm) <input type="number" id="wall-thickness" value="100" min="50" max="400" step="10" /></label>
       <button id="btn-new-room" title="입력한 크기로 병실 외곽을 새로 그립니다">새 도면</button>
       <button id="btn-load-image" title="기존 도면 사진을 배경으로 불러옵니다">도면 사진 불러오기</button>
       <input type="file" id="image-file-input" accept="image/*" hidden />
@@ -27,8 +27,8 @@
     <div class="nav-group">
       <label>스냅
         <select id="snap-size">
-          <option value="10" selected>10cm</option>
-          <option value="50">50cm</option>
+          <option value="10" selected>100mm</option>
+          <option value="50">500mm</option>
           <option value="0">끄기</option>
         </select>
       </label>
@@ -63,9 +63,9 @@
       <div id="custom-asset-form">
         <input type="text" id="custom-name" placeholder="시설 이름 (예: 회복실)" maxlength="20" />
         <div class="custom-size-row">
-          <input type="number" id="custom-w" value="200" min="30" step="10" title="가로(cm)" />
+          <input type="number" id="custom-w" value="2000" min="300" step="100" title="가로(mm)" />
           <span>×</span>
-          <input type="number" id="custom-h" value="200" min="30" step="10" title="세로(cm)" />
+          <input type="number" id="custom-h" value="2000" min="300" step="100" title="세로(mm)" />
           <input type="color" id="custom-color" value="#8BC34A" title="색상" />
         </div>
         <button id="btn-add-custom" class="tool-btn">+ 시설 추가</button>
@@ -125,10 +125,10 @@
       <div id="prop-empty">객체를 선택하세요</div>
       <div id="prop-form" hidden>
         <div class="prop-row"><span>이름</span><input type="text" id="prop-name" /></div>
-        <div class="prop-row"><span>X (cm)</span><input type="number" id="prop-x" step="10" /></div>
-        <div class="prop-row"><span>Y (cm)</span><input type="number" id="prop-y" step="10" /></div>
-        <div class="prop-row"><span>가로 (cm)</span><input type="number" id="prop-w" step="10" /></div>
-        <div class="prop-row"><span>세로 (cm)</span><input type="number" id="prop-h" step="10" /></div>
+        <div class="prop-row"><span>X (mm)</span><input type="number" id="prop-x" step="100" /></div>
+        <div class="prop-row"><span>Y (mm)</span><input type="number" id="prop-y" step="100" /></div>
+        <div class="prop-row"><span>가로 (mm)</span><input type="number" id="prop-w" step="100" /></div>
+        <div class="prop-row"><span>세로 (mm)</span><input type="number" id="prop-h" step="100" /></div>
         <div class="prop-row"><span>회전 (°)</span><input type="number" id="prop-angle" step="15" /></div>
         <div class="prop-row"><span>정수 필요</span><span id="prop-water">-</span></div>
       </div>
