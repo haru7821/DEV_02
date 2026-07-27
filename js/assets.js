@@ -165,6 +165,16 @@ const equipmentData = {
     color: "#B0BEC5",
     type: "room",
   },
+  // ── 배관 콘솔: 투석 장비 뒤(머리맡 벽면)를 따라 급수/배수 배관이 지나가는
+  //    설비 덕트. 두께(깊이)는 상단 네비 "콘솔(mm)" 입력으로 지정한다. ──
+  bed_console: {
+    label: "배관 콘솔 (Console)",
+    shortLabel: "CONSOLE",
+    width: 400, height: 25,     // height(두께)는 setConsoleDepth 설정값으로 대체됨
+    color: "#607D8B",
+    type: "equipment",
+    symbol: "console",
+  },
   // ── 정수실 내부 설비 (실제 정수실 시공 도면 참고, category:"wt") ──
   // 처리 순서: 원수 → Multimedia → Softner → Carbon → 5μ필터 → RO(CWP) → 공급
   cwp106h: {

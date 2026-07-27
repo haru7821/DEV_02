@@ -19,6 +19,7 @@
       <label>가로(mm) <input type="number" id="room-width" value="15000" min="3000" step="100" /></label>
       <label>세로(mm) <input type="number" id="room-height" value="10000" min="3000" step="100" /></label>
       <label>벽두께(mm) <input type="number" id="wall-thickness" value="100" min="50" max="400" step="10" /></label>
+      <label>콘솔(mm) <input type="number" id="console-depth" value="250" min="100" max="600" step="10" title="투석 장비 뒤 배관 콘솔의 두께" /></label>
       <button id="btn-new-room" title="입력한 크기로 병실 외곽을 새로 그립니다">새 도면</button>
       <button id="btn-load-image" title="기존 도면 사진을 배경으로 불러옵니다">도면 사진 불러오기</button>
       <input type="file" id="image-file-input" accept="image/*" hidden />
@@ -86,6 +87,7 @@
         <summary>⚙ Auto Modeling</summary>
         <div class="tb-body" id="auto-model-panel">
           <div class="prop-row"><span>병상 대수</span><input type="number" id="target-beds" value="20" min="1" max="100" /></div>
+          <div class="prop-row"><span>통로 폭(mm)</span><input type="number" id="passage-width" value="1500" min="800" max="4000" step="100" title="마주보는 장비 사이 사람이 이동할 통로 폭" /></div>
           <div id="facility-checks"><!-- 시설 체크박스 자동 생성 --></div>
           <button id="btn-auto-model" class="tool-btn" title="누를 때마다 다른 구성의 도면이 자동 생성됩니다">⚙ Auto Modeling 실행</button>
         </div>

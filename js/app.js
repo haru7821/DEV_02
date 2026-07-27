@@ -269,9 +269,13 @@
       const w = toCM(+$("room-width").value), h = toCM(+$("room-height").value); // 입력은 mm
       if (w < 300 || h < 300) return toast("병실 크기는 최소 3,000mm × 3,000mm 이상이어야 합니다.");
       FloorCanvas.setWallThickness(toCM(+$("wall-thickness").value));
+      FloorCanvas.setConsoleDepth(toCM(+$("console-depth").value));
       FloorCanvas.newRoom(w, h);
       $("validation-report").textContent = "아직 검증하지 않았습니다.";
     });
+    // 콘솔 두께 입력: 이후 추가/자동 배치되는 배관 콘솔부터 즉시 적용
+    $("console-depth").addEventListener("change", (e) =>
+      FloorCanvas.setConsoleDepth(toCM(+e.target.value)));
     $("btn-load-image").addEventListener("click", () => $("image-file-input").click());
     $("image-file-input").addEventListener("change", (e) => {
       if (e.target.files[0]) loadImageFile(e.target.files[0]);
@@ -280,6 +284,7 @@
     $("snap-size").addEventListener("change", (e) => FloorCanvas.setSnap(+e.target.value));
     $("btn-auto-layout").addEventListener("click", () => {
       FloorCanvas.setWallThickness(toCM(+$("wall-thickness").value));
+      FloorCanvas.setConsoleDepth(toCM(+$("console-depth").value));
       // 배경 도면 사진이 있으면 사진 크기를 유지, 없으면 입력값(mm)으로 새 도면 생성
       if (!FloorCanvas.getCanvas().backgroundImage) {
         const w = toCM(+$("room-width").value), h = toCM(+$("room-height").value);
@@ -292,6 +297,7 @@
     // Auto Modeling: 선택 시설 + 목표 병상 대수로 매번 다른 랜덤 구성 생성
     $("btn-auto-model").addEventListener("click", () => {
       FloorCanvas.setWallThickness(toCM(+$("wall-thickness").value));
+      FloorCanvas.setConsoleDepth(toCM(+$("console-depth").value));
       if (!FloorCanvas.getCanvas().backgroundImage) {
         const w = toCM(+$("room-width").value), h = toCM(+$("room-height").value);
         if (w < 300 || h < 300) return toast("병실 크기는 최소 3,000mm × 3,000mm 이상이어야 합니다.");
@@ -302,6 +308,7 @@
       const r = FloorCanvas.autoModel({
         targetBeds: +$("target-beds").value,
         facilities,
+        passage: toCM(+$("passage-width").value), // 마주보는 장비 사이 통로 폭
         seed: (Date.now() ^ Math.floor(Math.random() * 1e9)) >>> 0, // 누를 때마다 다른 시드
       });
       $("validation-report").textContent = "아직 검증하지 않았습니다.";
