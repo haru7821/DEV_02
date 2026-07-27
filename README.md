@@ -30,6 +30,7 @@ python3 -m http.server 8080
 | 병상 번호 | 병상 유닛에 HD1, HD2… 자동 부여, 속성 패널에서 수정, 행→열 순 재정렬 버튼 |
 | 급수/배수 배관 | Inlet(파랑 실선)·Drain(갈색 점선) 2계통, 시작점에 IN/DR 라벨 |
 | CORE | PS/EPS 샤프트를 대각선 X 기호로 배치 |
+| 정수실 설비 | 실제 정수실 시공 도면 기반 14종 — RO 시스템(CWP106H/CWP66), Multimedia·Softner·Carbon 여과탱크(밴드 원형 기호), 5μ 필터, 이송펌프(Auto/Manual), Heating System, Control Box, Main Panel(380V), 원수 인입·자연/강제배수, 220V 콘센트 |
 | 사용자 시설 | 이름·크기(mm)·색상을 지정해 임의 시설 등록 (JSON에 함께 저장) |
 | 도면 모드 | 흑백 건축 도면(청사진) 스타일 토글 — 배관 색상은 유지 |
 | 실행 취소/다시 실행 | Ctrl+Z / Ctrl+Y, 최근 50단계 스냅샷 |

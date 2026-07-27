@@ -185,12 +185,21 @@ const FloorCanvas = (() => {
     const spec = equipmentData[key];
     if (!spec) return null;
 
-    const rect = new fabric.Rect({
-      width: spec.width, height: spec.height,
-      fill: spec.color + "55",
-      stroke: spec.color, strokeWidth: 3,
-      originX: "center", originY: "center",
-    });
+    // 원형 계열(여과탱크·필터·배수구)은 사각형 대신 타원으로 렌더링
+    const isRound = spec.symbol === "tank" || spec.symbol === "circle";
+    const rect = isRound
+      ? new fabric.Ellipse({
+          rx: spec.width / 2, ry: spec.height / 2,
+          fill: spec.color + "33",
+          stroke: spec.color, strokeWidth: 3,
+          originX: "center", originY: "center",
+        })
+      : new fabric.Rect({
+          width: spec.width, height: spec.height,
+          fill: spec.color + "55",
+          stroke: spec.color, strokeWidth: 3,
+          originX: "center", originY: "center",
+        });
     const vertical = spec.height > spec.width * 1.4; // 세로형은 라벨을 세로로
     const text = new fabric.Text(spec.shortLabel ?? spec.label, {
       fontSize: Math.max(14, Math.min(spec.width, spec.height) / 6),
@@ -213,6 +222,26 @@ const FloorCanvas = (() => {
       parts.push(new fabric.Line(
         [-spec.width / 2, spec.height / 2, spec.width / 2, -spec.height / 2],
         { stroke: spec.color, strokeWidth: 2 }));
+    }
+    // 여과탱크 기호: 정수실 도면처럼 탱크 몸통에 가로 밴드 두 줄
+    if (spec.symbol === "tank") {
+      [-0.18, 0.18].forEach((f) => {
+        parts.push(new fabric.Rect({
+          width: spec.width * 0.78, height: spec.height * 0.12,
+          fill: spec.color,
+          originX: "center", originY: "center", top: spec.height * f,
+        }));
+      });
+    }
+    // 이송펌프 기호: Auto/Manual 펌프 원 두 개
+    if (spec.symbol === "pump") {
+      [-1, 1].forEach((s) => {
+        parts.push(new fabric.Circle({
+          radius: spec.height * 0.34,
+          fill: "#ffffff", stroke: spec.color, strokeWidth: 2,
+          originX: "center", originY: "center", left: s * spec.width * 0.24,
+        }));
+      });
     }
     parts.push(text);
     const grp = new fabric.Group(parts, {
