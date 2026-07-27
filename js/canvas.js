@@ -15,6 +15,14 @@ const FloorCanvas = (() => {
   let bedCounter = 0;         // 병상 번호(HD1, HD2, …) 순차 카운터
   let blueprintMode = false;  // 흑백 도면(청사진) 모드
 
+  // ── 실행 취소/다시 실행 히스토리 ──
+  let history = [];           // JSON 스냅샷 스택
+  let histIndex = -1;         // 현재 스냅샷 위치
+  let histDepth = 0;          // >0 이면 일괄 작업 중 (기록 안 함)
+  let restoring = false;      // undo/redo 복원 중
+  let histTimer = null;
+  let clipboard = null;       // 복사/붙여넣기 버퍼
+
   const GRID_STEP = 50;       // 화면에 그리는 그리드 간격(cm)
   let WALL = 10;              // 벽 두께(cm) — setWallThickness()로 변경
 
@@ -77,6 +85,11 @@ const FloorCanvas = (() => {
     canvas.on("mouse:up", () => { panning = false; canvas.selection = true; });
     canvas.on("mouse:dblclick", () => { if (pipeMode) finishPipe(); });
 
+    // ── 히스토리 기록: 객체 추가/삭제/수정 시 스냅샷 저장 ──
+    canvas.on("object:added", saveHistory);
+    canvas.on("object:removed", saveHistory);
+    canvas.on("object:modified", saveHistory);
+
     newRoom(room.width, room.height);
   }
 
@@ -89,6 +102,7 @@ const FloorCanvas = (() => {
 
   /* ───────────────── 병실(도면) 생성 ───────────────── */
   function newRoom(w, h) {
+    beginBulk();
     room = { width: w, height: h };
     bedCounter = 0; // 새 도면이므로 병상 번호 초기화
     canvas.clear();
@@ -97,6 +111,7 @@ const FloorCanvas = (() => {
     drawWalls();
     drawWallNote();
     fitToScreen();
+    endBulk();
   }
 
   function drawGrid() {
@@ -456,6 +471,7 @@ const FloorCanvas = (() => {
    * 벽면에 배치하고, 남은 면적에 병상 유닛(침대+투석기)을 규격 간격으로
    * 채운 뒤 정수 배관 동선을 그린다. */
   function autoLayout() {
+    beginBulk();
     const W = room.width, H = room.height;
     newRoomKeepBackground(W, H);
 
@@ -512,6 +528,7 @@ const FloorCanvas = (() => {
 
     canvas.discardActiveObject();
     canvas.requestRenderAll();
+    endBulk();
     return { beds: topBeds.length + bottomBeds.length };
   }
 
@@ -620,6 +637,217 @@ const FloorCanvas = (() => {
     return blueprintMode;
   }
 
+  /* ───────────────── 편집 도구 (EdrawMax 스타일) ─────────────────
+   * 실행취소/다시실행 · 복사/붙여넣기/복제 · 정렬/등간격 · 순서 · 반전 · 잠금 · 줌 */
+
+  function beginBulk() { histDepth += 1; }
+  function endBulk() {
+    histDepth = Math.max(0, histDepth - 1);
+    if (!histDepth) saveHistory();
+  }
+
+  /** 현재 도면을 히스토리에 저장 (연속 이벤트는 250ms 디바운스로 1회 기록) */
+  function saveHistory() {
+    if (histDepth > 0 || restoring || !canvas) return;
+    clearTimeout(histTimer);
+    histTimer = setTimeout(() => {
+      if (histDepth > 0 || restoring) return;
+      history = history.slice(0, histIndex + 1);
+      history.push(JSON.stringify(toJSON()));
+      if (history.length > 50) history.shift();
+      histIndex = history.length - 1;
+    }, 250);
+  }
+
+  function restoreSnapshot(idx) {
+    restoring = true;
+    const data = JSON.parse(history[idx]);
+    room = data.room;
+    canvas.loadFromJSON(data.canvas, () => {
+      restoring = false;
+      canvas.requestRenderAll();
+    });
+  }
+
+  function undo() {
+    if (histIndex <= 0) return false;
+    histIndex -= 1;
+    restoreSnapshot(histIndex);
+    return true;
+  }
+
+  function redo() {
+    if (histIndex >= history.length - 1) return false;
+    histIndex += 1;
+    restoreSnapshot(histIndex);
+    return true;
+  }
+
+  /* ── 복사 / 붙여넣기 / 복제 ──
+   * clone은 scaleX/scaleY·angle·flip을 그대로 가져가므로
+   * 속성 패널에서 크기를 조정한 객체도 조정된 크기 그대로 복제된다. */
+  function copySelection() {
+    const o = canvas.getActiveObject();
+    if (!o) return false;
+    o.clone((c) => { clipboard = c; }, ["meta"]);
+    return true;
+  }
+
+  function pasteClipboard() {
+    if (!clipboard) return false;
+    clipboard.clone((c) => {
+      beginBulk();
+      canvas.discardActiveObject();
+      c.set({ left: c.left + 20, top: c.top + 20, evented: true });
+      if (c.type === "activeSelection") {
+        // 다중 선택 복사: 구성 객체를 개별로 추가
+        c.canvas = canvas;
+        c.forEachObject((obj) => canvas.add(obj));
+        c.setCoords();
+      } else {
+        canvas.add(c);
+      }
+      applyBlueprintToObject(c);
+      canvas.setActiveObject(c);
+      canvas.requestRenderAll();
+      endBulk();
+    }, ["meta"]);
+    return true;
+  }
+
+  function duplicateSelection() {
+    return copySelection() && pasteClipboard();
+  }
+
+  /* ── 정렬 / 등간격 배치 ── */
+  /** 다중 선택을 절대 좌표로 계산한 뒤 다시 선택 상태로 되돌리는 공통 래퍼 */
+  function withSelection(minCount, fn) {
+    const sel = canvas.getActiveObject();
+    if (!sel || sel.type !== "activeSelection" || sel.getObjects().length < minCount) return false;
+    const objs = sel.getObjects();
+    canvas.discardActiveObject(); // 선택 좌표계 → 절대 좌표계
+    fn(objs.map((o) => ({ o, r: o.getBoundingRect(true) })));
+    objs.forEach((o) => o.setCoords());
+    canvas.setActiveObject(new fabric.ActiveSelection(objs, { canvas }));
+    canvas.requestRenderAll();
+    saveHistory();
+    return true;
+  }
+
+  /** mode: left | hcenter | right | top | vcenter | bottom */
+  function alignSelection(mode) {
+    return withSelection(2, (items) => {
+      const L = Math.min(...items.map((i) => i.r.left));
+      const R = Math.max(...items.map((i) => i.r.left + i.r.width));
+      const T = Math.min(...items.map((i) => i.r.top));
+      const B = Math.max(...items.map((i) => i.r.top + i.r.height));
+      items.forEach(({ o, r }) => {
+        if (mode === "left") o.set("left", o.left + (L - r.left));
+        else if (mode === "right") o.set("left", o.left + (R - r.width - r.left));
+        else if (mode === "hcenter") o.set("left", o.left + ((L + R - r.width) / 2 - r.left));
+        else if (mode === "top") o.set("top", o.top + (T - r.top));
+        else if (mode === "bottom") o.set("top", o.top + (B - r.height - r.top));
+        else if (mode === "vcenter") o.set("top", o.top + ((T + B - r.height) / 2 - r.top));
+      });
+    });
+  }
+
+  /** axis: "h"(가로 등간격) | "v"(세로 등간격) — 3개 이상 선택 시 */
+  function distributeSelection(axis) {
+    return withSelection(3, (items) => {
+      const pos = axis === "h" ? "left" : "top";
+      const size = axis === "h" ? "width" : "height";
+      items.sort((a, b) => a.r[pos] - b.r[pos]);
+      const start = items[0].r[pos];
+      const end = Math.max(...items.map((i) => i.r[pos] + i.r[size]));
+      const total = items.reduce((s, i) => s + i.r[size], 0);
+      const gap = (end - start - total) / (items.length - 1);
+      let cursor = start;
+      items.forEach(({ o, r }) => {
+        const delta = cursor - r[pos];
+        if (axis === "h") o.set("left", o.left + delta);
+        else o.set("top", o.top + delta);
+        cursor += r[size] + gap;
+      });
+    });
+  }
+
+  /* ── 순서 (Z-order) ── */
+  function bringSelectionToFront() {
+    const o = canvas.getActiveObject();
+    if (!o) return false;
+    o.bringToFront();
+    canvas.requestRenderAll();
+    return true;
+  }
+
+  function sendSelectionToBack() {
+    const o = canvas.getActiveObject();
+    if (!o) return false;
+    o.sendToBack();
+    // 주석 → 외벽 → 그리드 순으로 다시 최하단으로 보내 배경 구조를 유지
+    ["annotation", "wall", "grid"].forEach((key) => {
+      canvas.getObjects().filter((g) => g.meta && g.meta.key === key)
+        .forEach((g) => g.sendToBack());
+    });
+    canvas.requestRenderAll();
+    return true;
+  }
+
+  /* ── 반전 / 잠금 ── */
+  function flipSelection(axis) {
+    const o = canvas.getActiveObject();
+    if (!o) return false;
+    if (axis === "h") o.set("flipX", !o.flipX);
+    else o.set("flipY", !o.flipY);
+    canvas.requestRenderAll();
+    saveHistory();
+    return true;
+  }
+
+  /** 잠금 토글: 이동/회전/크기 조절을 막는다. 반환값 = 잠금 여부(null = 선택 없음) */
+  function toggleLockSelection() {
+    const o = canvas.getActiveObject();
+    if (!o || !o.meta) return null;
+    const lock = !o.meta.locked;
+    o.meta.locked = lock;
+    o.set({
+      lockMovementX: lock, lockMovementY: lock, lockRotation: lock,
+      lockScalingX: lock, lockScalingY: lock,
+      hasControls: !lock, opacity: lock ? 0.85 : 1,
+    });
+    canvas.requestRenderAll();
+    return lock;
+  }
+
+  /* ── 줌 컨트롤 ── */
+  function zoomBy(factor) {
+    const z = Math.min(4, Math.max(0.05, canvas.getZoom() * factor));
+    canvas.zoomToPoint({ x: canvas.getWidth() / 2, y: canvas.getHeight() / 2 }, z);
+    canvas.requestRenderAll();
+    return z;
+  }
+
+  /* ── PNG / SVG 내보내기 ── */
+  function exportSVG() {
+    const saved = canvas.viewportTransform.slice();
+    canvas.discardActiveObject();
+    canvas.renderAll();
+    const pad = 40;
+    const svg = canvas.toSVG({
+      viewBox: {
+        x: -WALL - pad, y: -WALL - pad,
+        width: room.width + WALL * 2 + pad * 2,
+        height: room.height + WALL * 2 + pad * 2 + 40, // 하단 주석 여유
+      },
+      width: room.width + WALL * 2 + pad * 2,
+      height: room.height + WALL * 2 + pad * 2 + 40,
+    });
+    canvas.setViewportTransform(saved);
+    canvas.requestRenderAll();
+    return svg;
+  }
+
   /* ───────────────── 조회/직렬화 유틸 ───────────────── */
   /** 그리드·벽·주석을 제외한 배치 객체 목록 */
   function getObjects() {
@@ -642,8 +870,10 @@ const FloorCanvas = (() => {
   }
 
   function loadJSON(data, done) {
+    beginBulk();
     room = data.room;
     canvas.loadFromJSON(data.canvas, () => {
+      endBulk();
       // 불러온 도면의 HD 번호 최댓값에서 병상 카운터를 이어간다
       bedCounter = canvas.getObjects().reduce((max, o) => {
         const m = o.meta && typeof o.meta.name === "string" && o.meta.name.match(/^HD(\d+)$/);
@@ -655,14 +885,16 @@ const FloorCanvas = (() => {
     });
   }
 
-  /** PDF 출력용: 도면 전체 영역을 고해상도 PNG로 렌더링 */
-  function exportImage() {
+  /** PDF/PNG 출력용: 도면 전체 영역을 고해상도 이미지로 렌더링 */
+  function exportImage(format = "jpeg") {
     const saved = canvas.viewportTransform.slice();
     fitToScreen();
     canvas.discardActiveObject();
     canvas.renderAll();
-    // JPEG 사용: PNG 대비 PDF 용량을 크게 줄임 (배경이 흰색이라 품질 손실 없음)
-    const url = canvas.toDataURL({ format: "jpeg", quality: 0.9, multiplier: 2 });
+    // PDF용 JPEG: PNG 대비 용량을 크게 줄임 (배경이 흰색이라 품질 손실 없음)
+    const url = format === "png"
+      ? canvas.toDataURL({ format: "png", multiplier: 2 })
+      : canvas.toDataURL({ format: "jpeg", quality: 0.9, multiplier: 2 });
     canvas.setViewportTransform(saved);
     canvas.requestRenderAll();
     return url;
@@ -674,6 +906,9 @@ const FloorCanvas = (() => {
     autoLayout, getObjects, deleteSelection, toJSON, loadJSON, exportImage,
     fitToScreen,
     setWallThickness, renumberBeds, renameSelected, setBlueprintMode,
+    undo, redo, copySelection, pasteClipboard, duplicateSelection,
+    alignSelection, distributeSelection, bringSelectionToFront, sendSelectionToBack,
+    flipSelection, toggleLockSelection, zoomBy, exportSVG,
     setSnap: (s) => { snapSize = s; },
     getRoom: () => room,
     getCanvas: () => canvas,

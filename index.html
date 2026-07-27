@@ -41,6 +41,8 @@
       <button id="btn-load-json">JSON 열기</button>
       <input type="file" id="json-file-input" accept=".json" hidden />
       <button id="btn-blueprint" title="흑백 건축 도면(청사진) 스타일로 전환합니다">도면 모드</button>
+      <button id="btn-export-png" title="도면을 PNG 이미지로 저장합니다">PNG</button>
+      <button id="btn-export-svg" title="도면을 SVG 벡터 파일로 저장합니다">SVG</button>
       <button id="btn-export-pdf" class="primary">PDF 출력 (가로)</button>
     </div>
   </header>
@@ -69,6 +71,30 @@
         <button id="btn-add-custom" class="tool-btn">+ 시설 추가</button>
       </div>
 
+      <h3>편집</h3>
+      <div class="edit-grid">
+        <button id="btn-undo" class="mini-btn" title="실행 취소 (Ctrl+Z)">↩ 취소</button>
+        <button id="btn-redo" class="mini-btn" title="다시 실행 (Ctrl+Y)">↪ 재실행</button>
+        <button id="btn-duplicate" class="mini-btn" title="복제 (Ctrl+D) — 크기 조정 상태 그대로 복제">⧉ 복제</button>
+        <button id="btn-lock" class="mini-btn" title="선택 객체 잠금/해제">🔒 잠금</button>
+        <button id="btn-flip-h" class="mini-btn" title="좌우 반전">⇋ 좌우</button>
+        <button id="btn-flip-v" class="mini-btn" title="상하 반전">⇅ 상하</button>
+        <button id="btn-front" class="mini-btn" title="맨 앞으로">▲ 앞으로</button>
+        <button id="btn-back" class="mini-btn" title="맨 뒤로">▼ 뒤로</button>
+      </div>
+
+      <h3>정렬 (다중 선택)</h3>
+      <div class="edit-grid">
+        <button id="btn-align-left" class="mini-btn" title="왼쪽 정렬">⇤ 좌</button>
+        <button id="btn-align-hcenter" class="mini-btn" title="가로 중앙 정렬">↔ 중</button>
+        <button id="btn-align-right" class="mini-btn" title="오른쪽 정렬">⇥ 우</button>
+        <button id="btn-align-top" class="mini-btn" title="위쪽 정렬">⤒ 상</button>
+        <button id="btn-align-vcenter" class="mini-btn" title="세로 중앙 정렬">↕ 중</button>
+        <button id="btn-align-bottom" class="mini-btn" title="아래쪽 정렬">⤓ 하</button>
+      </div>
+      <button id="btn-dist-h" class="tool-btn" title="3개 이상 선택 시 가로 간격을 동일하게">가로 등간격 배치</button>
+      <button id="btn-dist-v" class="tool-btn" title="3개 이상 선택 시 세로 간격을 동일하게">세로 등간격 배치</button>
+
       <h3>도구</h3>
       <button id="btn-group" class="tool-btn">선택 객체 그룹화</button>
       <button id="btn-ungroup" class="tool-btn">그룹 해제</button>
@@ -84,7 +110,13 @@
     <!-- ───────── 중앙 캔버스 ───────── -->
     <main id="canvas-wrap">
       <canvas id="floor-canvas"></canvas>
-      <div id="canvas-hint">휠: 확대/축소 · Alt+드래그: 화면 이동 · Del: 삭제</div>
+      <div id="canvas-hint">휠: 확대/축소 · Alt+드래그: 화면 이동 · Del: 삭제 · Ctrl+Z/Y 취소/재실행 · Ctrl+C/V/D 복사/붙여넣기/복제</div>
+      <div id="zoom-bar">
+        <button id="btn-zoom-out" title="축소">−</button>
+        <span id="zoom-label">100%</span>
+        <button id="btn-zoom-in" title="확대">+</button>
+        <button id="btn-zoom-fit" title="화면에 맞춤">⤢</button>
+      </div>
     </main>
 
     <!-- ───────── 우측 속성 패널 ───────── -->

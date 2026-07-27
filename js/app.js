@@ -310,9 +310,82 @@
     $("btn-delete").addEventListener("click", FloorCanvas.deleteSelection);
     $("btn-add-custom").addEventListener("click", addCustomAsset);
 
+    // PNG / SVG 내보내기
+    const downloadBlob = (blob, filename) => {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    };
+    $("btn-export-png").addEventListener("click", () => {
+      const url = FloorCanvas.exportImage("png");
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "dialysis-room-floorplan.png";
+      a.click();
+      toast("PNG 이미지가 다운로드되었습니다.", "info");
+    });
+    $("btn-export-svg").addEventListener("click", () => {
+      downloadBlob(new Blob([FloorCanvas.exportSVG()], { type: "image/svg+xml" }),
+        "dialysis-room-floorplan.svg");
+      toast("SVG 벡터 파일이 다운로드되었습니다.", "info");
+    });
+
+    // 편집 도구 (실행취소·복제·반전·순서·잠금)
+    $("btn-undo").addEventListener("click", () =>
+      FloorCanvas.undo() || toast("더 이상 취소할 작업이 없습니다."));
+    $("btn-redo").addEventListener("click", () =>
+      FloorCanvas.redo() || toast("다시 실행할 작업이 없습니다."));
+    $("btn-duplicate").addEventListener("click", () =>
+      FloorCanvas.duplicateSelection() || toast("복제할 객체를 먼저 선택하세요."));
+    $("btn-flip-h").addEventListener("click", () =>
+      FloorCanvas.flipSelection("h") || toast("반전할 객체를 먼저 선택하세요."));
+    $("btn-flip-v").addEventListener("click", () =>
+      FloorCanvas.flipSelection("v") || toast("반전할 객체를 먼저 선택하세요."));
+    $("btn-front").addEventListener("click", () =>
+      FloorCanvas.bringSelectionToFront() || toast("객체를 먼저 선택하세요."));
+    $("btn-back").addEventListener("click", () =>
+      FloorCanvas.sendSelectionToBack() || toast("객체를 먼저 선택하세요."));
+    $("btn-lock").addEventListener("click", () => {
+      const locked = FloorCanvas.toggleLockSelection();
+      if (locked === null) return toast("잠글 객체를 먼저 선택하세요.");
+      toast(locked ? "선택 객체를 잠갔습니다. (이동/크기/회전 불가)" : "잠금을 해제했습니다.", "info");
+    });
+
+    // 정렬 / 등간격 배치
+    const ALIGN_BUTTONS = {
+      "btn-align-left": "left", "btn-align-hcenter": "hcenter", "btn-align-right": "right",
+      "btn-align-top": "top", "btn-align-vcenter": "vcenter", "btn-align-bottom": "bottom",
+    };
+    Object.entries(ALIGN_BUTTONS).forEach(([id, mode]) => {
+      $(id).addEventListener("click", () =>
+        FloorCanvas.alignSelection(mode) || toast("Shift 클릭으로 두 개 이상 객체를 선택하세요."));
+    });
+    $("btn-dist-h").addEventListener("click", () =>
+      FloorCanvas.distributeSelection("h") || toast("세 개 이상 객체를 선택하세요."));
+    $("btn-dist-v").addEventListener("click", () =>
+      FloorCanvas.distributeSelection("v") || toast("세 개 이상 객체를 선택하세요."));
+
+    // 줌 컨트롤
+    const updateZoomLabel = () => {
+      $("zoom-label").textContent = Math.round(FloorCanvas.getCanvas().getZoom() * 100) + "%";
+    };
+    $("btn-zoom-in").addEventListener("click", () => { FloorCanvas.zoomBy(1.2); });
+    $("btn-zoom-out").addEventListener("click", () => { FloorCanvas.zoomBy(1 / 1.2); });
+    $("btn-zoom-fit").addEventListener("click", () => { FloorCanvas.fitToScreen(); });
+    FloorCanvas.getCanvas().on("after:render", updateZoomLabel);
+    updateZoomLabel();
+
     // 키보드
     document.addEventListener("keydown", (e) => {
       if (e.target.tagName === "INPUT") return;
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (ctrl && e.key.toLowerCase() === "z") { e.preventDefault(); FloorCanvas.undo(); return; }
+      if (ctrl && e.key.toLowerCase() === "y") { e.preventDefault(); FloorCanvas.redo(); return; }
+      if (ctrl && e.key.toLowerCase() === "c") { e.preventDefault(); FloorCanvas.copySelection(); return; }
+      if (ctrl && e.key.toLowerCase() === "v") { e.preventDefault(); FloorCanvas.pasteClipboard(); return; }
+      if (ctrl && e.key.toLowerCase() === "d") { e.preventDefault(); FloorCanvas.duplicateSelection(); return; }
       if (e.key === "Delete" || e.key === "Backspace") FloorCanvas.deleteSelection();
       if (e.key === "Escape") {
         FloorCanvas.finishPipe();
