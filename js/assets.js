@@ -24,13 +24,6 @@ const equipmentData = {
     type: "equipment",
     requiresWater: true,
   },
-  patient_monitor: {
-    label: "환자 모니터",
-    shortLabel: "모니터",
-    width: 40, height: 40,
-    color: "#03A9F4",
-    type: "equipment",
-  },
   // ── 웹 조사 기반 실측 투석기 (제조사 기술자료의 바닥 점유 치수, cm) ──
   fresenius_4008s: {
     label: "투석기 (Fresenius 4008S)",
@@ -329,6 +322,7 @@ const doorData = {
  */
 const MEDICAL_RULES = {
   MIN_BED_GAP_CM: 100,      // 병상 간 최소 이격 (권고안 0.8m, 의료법 특례 1.0m → 1.0m 채택)
+  FOOT_WALL_CLEARANCE_CM: 80, // 침대 발쪽-벽 최소 이격 (800mm — 통행·처치 공간)
   AREA_PER_BED_M2: 6,       // 병상당 최소 면적 (권고안 6m²)
   MAX_PIPE_RUN_CM: 2500,    // 정수실 ↔ requiresWater 장비 최대 배관 동선 (25m)
   BED_WALL_CLEARANCE_CM: 60 // 병상-벽 최소 여유 (자동 배치 시 참고)

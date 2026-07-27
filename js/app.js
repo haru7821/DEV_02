@@ -64,6 +64,14 @@
 
   function buildToolbar() {
     buildFacilityChecks();
+    // 병상 모듈(침대+투석기+모니터, 폭 = 모듈 폭 설정값) 원클릭 추가 버튼
+    $("equipment-buttons").appendChild(makeAssetButton(
+      { label: "병상 모듈 (침대+투석기)", color: "#2E7D32" }, "모듈",
+      () => {
+        FloorCanvas.setModuleWidth(toCM(+$("module-width").value));
+        const r = FloorCanvas.getRoom();
+        FloorCanvas.addBedUnit(Math.round(r.width / 2 - 90), Math.round(r.height / 2 - 110), false);
+      }));
     Object.entries(equipmentData).forEach(([key, spec]) => addEquipmentButton(key, spec));
     Object.entries(doorData).forEach(([key, spec]) => {
       $("door-buttons").appendChild(makeAssetButton(spec, `폭 ${toMM(spec.width)}`,
@@ -165,6 +173,13 @@
         `<li>간격 ${toMM(v.gap)}mm &lt; 기준 ${toMM(MEDICAL_RULES.MIN_BED_GAP_CM)}mm</li>`).join("") + "</ul>");
     } else if (result.spacing.bedCount >= 2) {
       lines.push(`<span class="ok">✔ 모든 병상 간격 ${toMM(MEDICAL_RULES.MIN_BED_GAP_CM)}mm 이상</span>`);
+    }
+
+    if (result.foot && result.foot.length) {
+      lines.push(`<span class="error">✖ 발쪽-벽 이격(800mm) 위반 ${result.foot.length}건</span>`);
+      lines.push("<ul>" + result.foot.map((w) => `<li>${w.msg}</li>`).join("") + "</ul>");
+    } else {
+      lines.push(`<span class="ok">✔ 발쪽-벽 이격 800mm 이상</span>`);
     }
 
     if (result.water.length) {
@@ -305,6 +320,7 @@
       }
       const facilities = [...new Set(["water_treatment",
         ...[...document.querySelectorAll("#facility-checks input:checked")].map((el) => el.dataset.key)])];
+      FloorCanvas.setModuleWidth(toCM(+$("module-width").value));
       const r = FloorCanvas.autoModel({
         targetBeds: +$("target-beds").value,
         facilities,

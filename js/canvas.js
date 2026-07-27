@@ -26,6 +26,7 @@ const FloorCanvas = (() => {
   const GRID_STEP = 50;       // 화면에 그리는 그리드 간격(cm)
   let WALL = 10;              // 벽 두께(cm) — setWallThickness()로 변경
   let consoleDepth = 25;      // 배관 콘솔 두께(cm) — setConsoleDepth()로 변경
+  let moduleWidth = 180;      // 병상 모듈 폭(cm): 침대+투석기 존 (참고 도면 1800mm 피치)
 
   /** 벽 두께 설정(cm). 다음 새 도면/자동 배치부터 적용된다. */
   function setWallThickness(t) {
@@ -35,6 +36,11 @@ const FloorCanvas = (() => {
   /** 배관 콘솔 두께 설정(cm). 이후 추가/자동 배치되는 콘솔부터 적용된다. */
   function setConsoleDepth(t) {
     consoleDepth = Math.min(60, Math.max(10, Math.round(+t) || 25));
+  }
+
+  /** 병상 모듈 폭 설정(cm). 침대(120cm)+투석기 존으로 구성되며 최소 175cm. */
+  function setModuleWidth(t) {
+    moduleWidth = Math.min(300, Math.max(175, Math.round(+t) || 180));
   }
 
   /* ───────────────── 초기화 ───────────────── */
@@ -618,14 +624,24 @@ const FloorCanvas = (() => {
     return beds;
   }
 
-  /** 침대 + 투석기 + 모니터를 하나의 유닛 그룹으로 생성 (HD 번호 자동 부여)
+  /** 침대 + 투석기 + 모니터를 폭 moduleWidth의 '병상 모듈'로 생성 (HD 번호 자동 부여)
+   *  모듈 경계 프레임이 그룹 폭을 고정하므로 모듈끼리 붙여서(피치=모듈 폭) 배치할 수 있다.
    *  headDown=true면 머리맡(투석기 쪽)이 아래 — 콘솔 양면 배치의 위쪽 행에 사용 */
   function addBedUnit(x, y, isolated, headDown = false) {
+    const mw = moduleWidth;
+    // 모듈 경계: 침대 + 장비 존을 하나의 타일로 묶는 점선 프레임
+    const frame = new fabric.Rect({
+      left: x, top: y, width: mw, height: 220,
+      fill: "rgba(96,125,139,0.05)",
+      stroke: "#90A4AE", strokeWidth: 1.5, strokeDashArray: [8, 6],
+    });
+    frame.meta = { key: "module_frame", label: "모듈 경계" };
+    canvas.add(frame);
     // 침대는 유닛 내부이므로 inUnit으로 단독 HD 번호 부여를 건너뛰고, 유닛에 번호를 준다
     const bed = addEquipment("dialysis_bed", { left: x, top: y, silent: true, inUnit: true });
-    const machine = addEquipment("dialysis_machine", { left: x + 125, top: headDown ? y + 150 : y, silent: true });
-    const monitor = addEquipment("patient_monitor", { left: x + 125, top: headDown ? y + 80 : y + 80, silent: true });
-    const sel = new fabric.ActiveSelection([bed, machine, monitor], { canvas });
+    const mx = x + 120 + Math.max(3, Math.round((mw - 120 - 50) / 2)); // 장비 존 중앙
+    const machine = addEquipment("dialysis_machine", { left: mx, top: headDown ? y + 150 : y, silent: true });
+    const sel = new fabric.ActiveSelection([frame, bed, machine], { canvas });
     const grp = sel.toGroup();
     grp.meta = {
       key: "bed_unit",
@@ -633,7 +649,8 @@ const FloorCanvas = (() => {
       requiresWater: true,
       isolationCapable: true,
       isolated,
-      members: ["dialysis_bed", "dialysis_machine", "patient_monitor"],
+      headDown, // true = 머리맡 아래(발쪽 위) — 발쪽-벽 이격 검증에 사용
+      members: ["module_frame", "dialysis_bed", "dialysis_machine"],
     };
     assignBedNumber(grp);
     canvas.requestRenderAll();
@@ -915,20 +932,22 @@ const FloorCanvas = (() => {
     // ── 병상 필드: 콘솔 양면(back-to-back) 밴드 구조 ──
     // 조건 ④: 하나의 배관 콘솔을 사이에 두고 위(머리↓)/아래(머리↑) 양방향으로
     // 병상 유닛을 설치한다. 밴드 피치 = 병상 + 콘솔 + 병상 + 통로.
-    const unitGap = MEDICAL_RULES.MIN_BED_GAP_CM + 10 + Math.floor(rng() * 6) * 10; // 변형 ②: 간격 110~160cm
-    const pitch = 175 + unitGap; // 병상 유닛 폭(175cm) + 간격
+    // 병상 모듈(침대+투석기 존)은 서로 붙여 배치: 피치 = 모듈 폭
+    // (참고 도면의 1800mm 병상 피치 — 침대 사이는 장비 존으로 분리)
+    const MW = moduleWidth;
+    const pitch = MW;
 
     /** 한 행 채우기: 통로·격리실을 피해 좌→우로 병상 유닛 배치 */
     const fillRow = (yBed, headDown) => {
       let rx0 = fieldX0, rx1 = fieldX1;
       if (isoZone && yBed < isoZone.bottom + 40) { // 격리실 높이 구간은 회피
-        if (techSide === "left") rx1 = Math.min(rx1, isoZone.left - 40);
-        else rx0 = Math.max(rx0, isoZone.right + 40);
+        if (techSide === "left") rx1 = Math.min(rx1, isoZone.left - 45);
+        else rx0 = Math.max(rx0, isoZone.right + 45);
       }
       const row = [];
       let x = rx0;
-      while (x + 175 <= rx1 && placedBeds.length < target) {
-        if (corridor && x + 175 > corridor.x0 && x < corridor.x1) {
+      while (x + MW <= rx1 && placedBeds.length < target) {
+        if (corridor && x + MW > corridor.x0 && x < corridor.x1) {
           x = Math.round((corridor.x1 + 10) / 10) * 10; // 주 동선 통로는 비운다
           continue;
         }
@@ -953,7 +972,8 @@ const FloorCanvas = (() => {
     };
 
     const bands = []; // { consoleY, above: [...], below: [...] }
-    let by = M + 20;
+    // 첫 밴드 위 행은 발쪽이 상단 벽을 향하므로 발-벽 이격 800mm을 확보하고 시작
+    let by = Math.max(M + 20, MEDICAL_RULES.FOOT_WALL_CLEARANCE_CM);
     while (placedBeds.length < target && by + 220 + CD + 220 <= fieldY1) {
       // 양면 밴드: 위 행(머리 아래쪽) + 콘솔 + 아래 행(머리 위쪽)
       const above = fillRow(by, true);
@@ -1034,19 +1054,19 @@ const FloorCanvas = (() => {
         addPipe([{ x: trunkX, y: inletYOf(consoleY) }, { x: farX, y: inletYOf(consoleY) }], "inlet");
         addPipe([{ x: trunkX, y: drainYOf(consoleY) }, { x: farX, y: drainYOf(consoleY) }], "drain");
         // 위 행(머리 아래쪽): 콘솔에서 위로 분기 / 아래 행(머리 위쪽): 아래로 분기
+        // 분기 위치는 모듈 내 장비 존 중앙(투석기 위치)
+        const pxOf = (b) => b.left + Math.round((b.width + 120) / 2);
         above.forEach((b) => {
-          const px = b.left + b.width - 30;
-          addPipe([{ x: px, y: inletYOf(consoleY) }, { x: px, y: b.top + 200 }], "inlet");
+          addPipe([{ x: pxOf(b), y: inletYOf(consoleY) }, { x: pxOf(b), y: b.top + 200 }], "inlet");
         });
         below.forEach((b) => {
-          const px = b.left + b.width - 30;
-          addPipe([{ x: px, y: inletYOf(consoleY) }, { x: px, y: b.top + 20 }], "inlet");
+          addPipe([{ x: pxOf(b), y: inletYOf(consoleY) }, { x: pxOf(b), y: b.top + 20 }], "inlet");
         });
       });
       // 격리 병상 분기: 첫 밴드 주행선 끝에서 격리실 안까지 연장
       if (isoBedGrp) {
         const runY0 = inletYOf(bands[0].consoleY);
-        const isoPx = isoBedGrp.left + isoBedGrp.width - 30;
+        const isoPx = isoBedGrp.left + Math.round((isoBedGrp.width + 120) / 2);
         const first = [...bands[0].above, ...bands[0].below];
         const farX = techSide === "left"
           ? Math.max(...first.map((b) => b.left + b.width))
@@ -1064,7 +1084,7 @@ const FloorCanvas = (() => {
       placed: placedBeds.length,
       target,
       variant: {
-        techSide, aisle, unitGap, consoleDepth: CD,
+        techSide, aisle, moduleWidth: MW, consoleDepth: CD,
         // 부속시설(실) 면적 : 전체 면적 비율 — 조건 ③ 1:1 목표
         facilityRatio: Math.round((baseArea * kScale * kScale) / (W * H) * 100) / 100,
       },
@@ -1339,7 +1359,8 @@ const FloorCanvas = (() => {
     groupSelection, ungroupSelection, togglePipeMode, finishPipe,
     autoLayout, autoModel, getObjects, deleteSelection, toJSON, loadJSON, exportImage,
     fitToScreen,
-    setWallThickness, setConsoleDepth, renumberBeds, renameSelected, setBlueprintMode,
+    setWallThickness, setConsoleDepth, setModuleWidth, addBedUnit,
+    renumberBeds, renameSelected, setBlueprintMode,
     undo, redo, copySelection, pasteClipboard, duplicateSelection,
     alignSelection, distributeSelection, bringSelectionToFront, sendSelectionToBack,
     flipSelection, toggleLockSelection, zoomBy, exportSVG,

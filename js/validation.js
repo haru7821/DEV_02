@@ -49,6 +49,18 @@ const Validator = (() => {
       c.right > Math.max(a.left, b.left) && c.left < Math.min(a.right, b.right));
   }
 
+  /**
+   * 모듈 밀착 예외: 병상 모듈(침대+장비 존)끼리 좌우로 붙여 배치한 경우
+   * (참고 도면의 1800mm 모듈 피치). 침대 사이는 모듈 내 장비 존이 분리한다.
+   */
+  function moduleAdjacent(a, b, oa, ob) {
+    if (oa.meta.key !== "bed_unit" || ob.meta.key !== "bed_unit") return false;
+    const yOverlap = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+    if (yOverlap < 100) return false; // 같은 행에서 나란히 붙은 경우만
+    const dx = Math.max(0, a.left - b.right, b.left - a.right);
+    return dx <= 10;
+  }
+
   function checkBedSpacing(objects) {
     const beds = objects.filter(isBed);
     const consoles = objects.filter((o) => o.meta.key === "bed_console").map(bbox);
@@ -57,7 +69,11 @@ const Validator = (() => {
       for (let j = i + 1; j < beds.length; j++) {
         const ba = bbox(beds[i]), bb = bbox(beds[j]);
         const gap = rectGap(ba, bb);
-        if (gap < MEDICAL_RULES.MIN_BED_GAP_CM && !consoleBetween(ba, bb, consoles)) {
+        // 허용 오차 2cm: 바운딩 박스가 테두리 선 두께를 포함해 실제보다
+        // 약간 크게 잡히는 렌더링 오차를 보정한다
+        if (gap < MEDICAL_RULES.MIN_BED_GAP_CM - 2 &&
+            !consoleBetween(ba, bb, consoles) &&
+            !moduleAdjacent(ba, bb, beds[i], beds[j])) {
           violations.push({ a: beds[i], b: beds[j], gap: Math.round(gap) });
         }
       }
@@ -95,6 +111,40 @@ const Validator = (() => {
       warnings.push({ msg: "정수 배관이 도면에 그려지지 않았습니다. (좌측 '정수 배관 그리기' 또는 자동 배치 사용)", targets: [] });
     }
     return warnings;
+  }
+
+  /* ───────── ②-2 침대 발쪽-벽 이격 검증 (최소 800mm) ─────────
+   * 병상 모듈의 발쪽(머리 반대편)이 외벽과 80cm 미만이면 통행·처치 공간
+   * 부족으로 경고한다. meta.headDown=true면 발쪽이 위(top), 아니면 아래(bottom). */
+  function checkFootClearance(objects, room) {
+    if (!room) return [];
+    const min = MEDICAL_RULES.FOOT_WALL_CLEARANCE_CM;
+    // 발 방향에 있는 '벽 역할' 장애물: 외벽 + 부속실/기반설비 실
+    const walls = objects.filter((o) => ["room", "infrastructure"].includes(o.meta.type)).map(bbox);
+    const bad = [];
+    objects.filter((o) => o.meta.key === "bed_unit").forEach((b) => {
+      const r = bbox(b);
+      let footGap;
+      if (b.meta.headDown) { // 발쪽 = 위
+        footGap = r.top; // 상단 외벽까지
+        walls.forEach((w) => {
+          if (w.right > r.left && w.left < r.right && w.bottom <= r.top + 5) {
+            footGap = Math.min(footGap, r.top - w.bottom);
+          }
+        });
+      } else {               // 발쪽 = 아래
+        footGap = room.height - r.bottom; // 하단 외벽까지
+        walls.forEach((w) => {
+          if (w.right > r.left && w.left < r.right && w.top >= r.bottom - 5) {
+            footGap = Math.min(footGap, w.top - r.bottom);
+          }
+        });
+      }
+      if (footGap < min) {
+        bad.push({ msg: `「${b.meta.name ?? b.meta.label}」 발쪽-벽 이격 ${Math.round(footGap * 10)}mm < 기준 ${min * 10}mm`, targets: [b] });
+      }
+    });
+    return bad;
   }
 
   /* ───────── ③ 필수 시설 검증 ───────── */
@@ -158,17 +208,19 @@ const Validator = (() => {
     stopBlink(canvas);
     const spacing = checkBedSpacing(objects);
     const water = checkWaterRuns(objects);
+    const foot = checkFootClearance(objects, room);
     const missing = checkRequiredRooms(objects);
     const area = room ? checkAreaPerBed(room, spacing.bedCount) : null;
 
     const badObjects = new Set();
     spacing.violations.forEach((v) => { badObjects.add(v.a); badObjects.add(v.b); });
     water.forEach((w) => w.targets.forEach((t) => badObjects.add(t)));
+    foot.forEach((w) => w.targets.forEach((t) => badObjects.add(t)));
     if (badObjects.size) startBlink(canvas, [...badObjects]);
 
     return {
-      spacing, water, missing, area,
-      pass: !spacing.violations.length && !water.length && !missing.length && (!area || area.ok),
+      spacing, water, foot, missing, area,
+      pass: !spacing.violations.length && !water.length && !foot.length && !missing.length && (!area || area.ok),
     };
   }
 
