@@ -85,6 +85,7 @@ const Validator = (() => {
     const missing = [];
     if (!objects.some((o) => o.meta.key === "nurse_station")) missing.push("간호사실");
     if (!objects.some((o) => o.meta.key === "water_treatment")) missing.push("정수실");
+    if (!objects.some((o) => o.meta.isDoor)) missing.push("출입문 (자동문/여닫이문)");
     return missing;
   }
 

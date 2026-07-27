@@ -49,6 +49,24 @@
       <h3>병상 / 장비</h3>
       <div id="equipment-buttons"><!-- assets.js 데이터로 자동 생성 --></div>
 
+      <h3>부속실</h3>
+      <div id="room-buttons"><!-- assets.js 데이터로 자동 생성 --></div>
+
+      <h3>문 / 개구부</h3>
+      <div id="door-buttons"><!-- assets.js doorData로 자동 생성 --></div>
+
+      <h3>사용자 시설 추가</h3>
+      <div id="custom-asset-form">
+        <input type="text" id="custom-name" placeholder="시설 이름 (예: 회복실)" maxlength="20" />
+        <div class="custom-size-row">
+          <input type="number" id="custom-w" value="200" min="30" step="10" title="가로(cm)" />
+          <span>×</span>
+          <input type="number" id="custom-h" value="200" min="30" step="10" title="세로(cm)" />
+          <input type="color" id="custom-color" value="#8BC34A" title="색상" />
+        </div>
+        <button id="btn-add-custom" class="tool-btn">+ 시설 추가</button>
+      </div>
+
       <h3>도구</h3>
       <button id="btn-group" class="tool-btn">선택 객체 그룹화</button>
       <button id="btn-ungroup" class="tool-btn">그룹 해제</button>

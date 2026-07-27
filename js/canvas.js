@@ -253,6 +253,75 @@ const FloorCanvas = (() => {
     return pipe;
   }
 
+  /* ───────────────── 문(개구부) 추가 ─────────────────
+   * 건축 도면 기호로 렌더링. 가로 방향(문 폭 = x축)으로 그리고
+   * 사용자가 회전(angle)으로 벽에 맞춘다. */
+  function addDoor(key, opts = {}) {
+    const spec = doorData[key];
+    if (!spec) return null;
+
+    // 공통: 개구부(벽 절개) 표현 — 흰색 바탕 사각형
+    const parts = [
+      new fabric.Rect({
+        left: 0, top: -7, width: spec.width, height: 14,
+        fill: "#ffffff", stroke: "#90a4ae", strokeWidth: 1,
+      }),
+    ];
+
+    const leaf = (coords) =>
+      new fabric.Line(coords, { stroke: "#37474F", strokeWidth: 4 });
+    const arc = (path) =>
+      new fabric.Path(path, {
+        fill: "", stroke: "#78909C", strokeWidth: 1.5, strokeDashArray: [6, 5],
+      });
+
+    if (key === "swing_door") {
+      // 경첩 (0,0), 문짝 + 1/4 원호 개폐 궤적
+      parts.push(leaf([0, 0, 0, -90]));
+      parts.push(arc("M 0 -90 A 90 90 0 0 1 90 0"));
+    } else if (key === "double_swing_door") {
+      // 좌(경첩 x=0)·우(경첩 x=180) 대칭 두 짝
+      parts.push(leaf([0, 0, 0, -90]));
+      parts.push(arc("M 0 -90 A 90 90 0 0 1 90 0"));
+      parts.push(leaf([180, 0, 180, -90]));
+      parts.push(arc("M 180 -90 A 90 90 0 0 0 90 0"));
+    } else if (key === "auto_door") {
+      // 슬라이딩 패널 2장 + AUTO 표기
+      parts.push(new fabric.Rect({
+        left: 2, top: -4, width: 86, height: 8,
+        fill: "#B3E5FC", stroke: spec.color, strokeWidth: 2,
+      }));
+      parts.push(new fabric.Rect({
+        left: 92, top: -4, width: 86, height: 8,
+        fill: "#B3E5FC", stroke: spec.color, strokeWidth: 2,
+      }));
+      parts.push(new fabric.Text("AUTO", {
+        fontSize: 16, fill: spec.color,
+        originX: "center", left: 90, top: -26,
+      }));
+    } else if (key === "sliding_door") {
+      // 미닫이: 패널 + 겹침 패널
+      parts.push(new fabric.Rect({
+        left: 0, top: -10, width: 72, height: 8,
+        fill: "#CFD8DC", stroke: spec.color, strokeWidth: 2,
+      }));
+      parts.push(new fabric.Rect({
+        left: 54, top: 2, width: 66, height: 8,
+        fill: "#ECEFF1", stroke: spec.color, strokeWidth: 2,
+      }));
+    }
+
+    const grp = new fabric.Group(parts, {
+      left: opts.left ?? room.width / 2 - spec.width / 2,
+      top: opts.top ?? room.height - 7,
+      angle: opts.angle ?? 0,
+    });
+    grp.meta = { key, label: spec.label, isDoor: true };
+    canvas.add(grp);
+    if (!opts.silent) { canvas.setActiveObject(grp); canvas.requestRenderAll(); }
+    return grp;
+  }
+
   /* ───────────────── 자동 배치 ─────────────────
    * 입력된 병실 크기에 맞춰 정수실·창고·탈의실·화장실·간호사실·격리실을
    * 벽면에 배치하고, 남은 면적에 병상 유닛(침대+투석기)을 규격 간격으로
@@ -301,6 +370,16 @@ const FloorCanvas = (() => {
 
     // ⑥ 정수 배관 동선: 정수실 → 상단 벽 주행 → 각 병상 분기
     drawPipeRuns(topBeds, bottomBeds, bottomRowY);
+
+    // ⑦ 출입문 자동 배치
+    addDoor("auto_door", { left: nurseX - 220, top: H - 4, silent: true });     // 주 출입구 자동문
+    addDoor("swing_door", { left: 40, top: H - 264, silent: true });            // 탈의실 문
+    addDoor("swing_door", { left: 240, top: H - 214, silent: true });           // 화장실 문
+    addDoor("swing_door", { left: 322, top: 60, angle: 90, silent: true });     // 정수실 문 (오른쪽 벽, 세로)
+    addDoor("swing_door", { left: 232, top: 470, angle: 90, silent: true });    // 창고 문 (오른쪽 벽)
+    if (hasIsolation) {
+      addDoor("sliding_door", { left: W - 300, top: 306, silent: true });      // 격리실 하단 미닫이문
+    }
 
     canvas.discardActiveObject();
     canvas.requestRenderAll();
@@ -394,14 +473,15 @@ const FloorCanvas = (() => {
     fitToScreen();
     canvas.discardActiveObject();
     canvas.renderAll();
-    const url = canvas.toDataURL({ format: "png", multiplier: 2 });
+    // JPEG 사용: PNG 대비 PDF 용량을 크게 줄임 (배경이 흰색이라 품질 손실 없음)
+    const url = canvas.toDataURL({ format: "jpeg", quality: 0.9, multiplier: 2 });
     canvas.setViewportTransform(saved);
     canvas.requestRenderAll();
     return url;
   }
 
   return {
-    init, newRoom, setBackgroundImage, addEquipment, addPipe,
+    init, newRoom, setBackgroundImage, addEquipment, addPipe, addDoor,
     groupSelection, ungroupSelection, togglePipeMode, finishPipe,
     autoLayout, getObjects, deleteSelection, toJSON, loadJSON, exportImage,
     fitToScreen,

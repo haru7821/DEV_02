@@ -68,6 +68,75 @@ const equipmentData = {
     type: "room",
     isolation: true,
   },
+  // ── 실제 인공신장실 도면(대동병원 등)에서 확인되는 부속실 ──
+  waiting_area: {
+    label: "환자 대기실",
+    width: 300, height: 250,
+    color: "#FFC107",
+    type: "room",
+  },
+  treatment_room: {
+    label: "간호처치실",
+    width: 250, height: 200,
+    color: "#FFB74D",
+    type: "room",
+  },
+  pharmacy_room: {
+    label: "조제실",
+    width: 200, height: 200,
+    color: "#BA68C8",
+    type: "room",
+  },
+  linen_room: {
+    label: "린넨실",
+    width: 200, height: 200,
+    color: "#A1887F",
+    type: "room",
+  },
+  laundry_room: {
+    label: "세탁실",
+    width: 200, height: 200,
+    color: "#4DB6AC",
+    type: "room",
+  },
+  waste_room: {
+    label: "오물처리실",
+    width: 150, height: 200,
+    color: "#8D6E63",
+    type: "room",
+  },
+  clean_room: {
+    label: "기구세척실",
+    width: 200, height: 200,
+    color: "#26A69A",
+    type: "room",
+  },
+  consult_room: {
+    label: "상담실",
+    width: 200, height: 200,
+    color: "#90A4AE",
+    type: "room",
+  },
+  office_room: {
+    label: "과장실 (사무실)",
+    width: 250, height: 200,
+    color: "#B0BEC5",
+    type: "room",
+  },
+};
+
+/**
+ * 문/개구부 데이터 — 건축 도면 기호로 렌더링 (canvas.js의 addDoor 참조)
+ *  - swing_door        : 문짝 + 1/4 원호 개폐 궤적 (여닫이 외짝)
+ *  - double_swing_door : 좌우 대칭 두 짝 (주 출입구 등)
+ *  - auto_door         : 좌우 슬라이딩 패널 2장 (AUTO 표기)
+ *  - sliding_door      : 미닫이 외짝
+ */
+const doorData = {
+  swing_door: { label: "여닫이문 (외짝)", width: 90, color: "#37474F" },
+  double_swing_door: { label: "여닫이문 (양짝)", width: 180, color: "#37474F" },
+  auto_door: { label: "자동문", width: 180, color: "#0288D1" },
+  sliding_door: { label: "미닫이문", width: 120, color: "#546E7A" },
 };
 
 /** 의료 규격 상수 (validation.js에서 사용) */

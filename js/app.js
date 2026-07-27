@@ -16,21 +16,56 @@
   }
 
   /* ───────── 좌측 툴바: 에셋 버튼 / 범례 자동 생성 ───────── */
-  function buildToolbar() {
-    const btnWrap = $("equipment-buttons");
-    const legend = $("legend");
-    Object.entries(equipmentData).forEach(([key, spec]) => {
-      const btn = document.createElement("button");
-      btn.className = "asset-btn";
-      btn.innerHTML = `<span class="asset-swatch" style="background:${spec.color}"></span>${spec.label}
-        <small style="margin-left:auto;color:#90a4ae">${spec.width}×${spec.height}</small>`;
-      btn.addEventListener("click", () => FloorCanvas.addEquipment(key));
-      btnWrap.appendChild(btn);
+  const customAssets = {}; // 사용자 정의 시설 (JSON 저장/불러오기 시 함께 직렬화)
 
-      const li = document.createElement("li");
-      li.innerHTML = `<span class="asset-swatch" style="background:${spec.color}"></span>${spec.label}`;
-      legend.appendChild(li);
+  function makeAssetButton(spec, sizeText, onClick) {
+    const btn = document.createElement("button");
+    btn.className = "asset-btn";
+    btn.innerHTML = `<span class="asset-swatch" style="background:${spec.color}"></span>${spec.label}
+      <small style="margin-left:auto;color:#90a4ae">${sizeText}</small>`;
+    btn.addEventListener("click", onClick);
+    return btn;
+  }
+
+  function addEquipmentButton(key, spec) {
+    const target = spec.type === "room" ? $("room-buttons") : $("equipment-buttons");
+    target.appendChild(makeAssetButton(spec, `${spec.width}×${spec.height}`,
+      () => FloorCanvas.addEquipment(key)));
+
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="asset-swatch" style="background:${spec.color}"></span>${spec.label}`;
+    $("legend").appendChild(li);
+  }
+
+  function buildToolbar() {
+    Object.entries(equipmentData).forEach(([key, spec]) => addEquipmentButton(key, spec));
+    Object.entries(doorData).forEach(([key, spec]) => {
+      $("door-buttons").appendChild(makeAssetButton(spec, `폭 ${spec.width}`,
+        () => FloorCanvas.addDoor(key)));
     });
+  }
+
+  /** 사용자 정의 시설을 카탈로그에 등록하고 툴바 버튼을 생성 */
+  function registerCustomAsset(key, spec) {
+    if (equipmentData[key]) return;
+    equipmentData[key] = spec;
+    customAssets[key] = spec;
+    addEquipmentButton(key, spec);
+  }
+
+  function addCustomAsset() {
+    const name = $("custom-name").value.trim();
+    const w = +$("custom-w").value, h = +$("custom-h").value;
+    if (!name) return toast("시설 이름을 입력하세요.");
+    if (!(w >= 30 && h >= 30)) return toast("시설 크기는 30cm 이상이어야 합니다.");
+    const key = "custom_" + Date.now();
+    registerCustomAsset(key, {
+      label: name, width: w, height: h,
+      color: $("custom-color").value, type: "room", custom: true,
+    });
+    FloorCanvas.addEquipment(key);
+    $("custom-name").value = "";
+    toast(`「${name}」 시설이 추가되었습니다. 부속실 목록에서 다시 사용할 수 있습니다.`, "info");
   }
 
   /* ───────── 우측 속성 패널 ───────── */
@@ -132,7 +167,7 @@
     const ratio = room.width / room.height;
     let w = availW, h = w / ratio;
     if (h > availH) { h = availH; w = h * ratio; }
-    pdf.addImage(img, "PNG", margin + (availW - w) / 2, margin + headH + (availH - h) / 2, w, h);
+    pdf.addImage(img, "JPEG", margin + (availW - w) / 2, margin + headH + (availH - h) / 2, w, h);
 
     pdf.save("dialysis-room-floorplan.pdf");
     toast("PDF(가로모드) 파일이 다운로드되었습니다.", "info");
@@ -140,7 +175,9 @@
 
   /* ───────── JSON 저장 / 열기 ───────── */
   function saveJSON() {
-    const blob = new Blob([JSON.stringify(FloorCanvas.toJSON(), null, 2)], { type: "application/json" });
+    const data = FloorCanvas.toJSON();
+    data.customAssets = customAssets; // 사용자 정의 시설 사양도 함께 저장
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = "dialysis-room-plan.json";
@@ -152,7 +189,9 @@
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        FloorCanvas.loadJSON(JSON.parse(reader.result), () => toast("도면을 불러왔습니다.", "info"));
+        const data = JSON.parse(reader.result);
+        Object.entries(data.customAssets ?? {}).forEach(([k, s]) => registerCustomAsset(k, s));
+        FloorCanvas.loadJSON(data, () => toast("도면을 불러왔습니다.", "info"));
       } catch (e) {
         toast("JSON 파일을 읽을 수 없습니다: " + e.message);
       }
@@ -221,6 +260,7 @@
       if (on) toast("캔버스를 클릭해 배관 경로를 찍고, 더블클릭으로 완료하세요.", "info");
     });
     $("btn-delete").addEventListener("click", FloorCanvas.deleteSelection);
+    $("btn-add-custom").addEventListener("click", addCustomAsset);
 
     // 키보드
     document.addEventListener("keydown", (e) => {
