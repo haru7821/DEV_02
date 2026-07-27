@@ -47,6 +47,38 @@
     </div>
   </header>
 
+  <!-- ───────── 상단 커맨드 바 (편집 · 정렬 · 도구) ───────── -->
+  <div id="edit-toolbar">
+    <div class="cmd-group" aria-label="편집">
+      <button id="btn-undo" class="cmd-btn" title="실행 취소 (Ctrl+Z)">↩ 취소</button>
+      <button id="btn-redo" class="cmd-btn" title="다시 실행 (Ctrl+Y)">↪ 재실행</button>
+      <button id="btn-duplicate" class="cmd-btn" title="복제 (Ctrl+D) — 크기 조정 상태 그대로 복제">⧉ 복제</button>
+      <button id="btn-lock" class="cmd-btn" title="선택 객체 잠금/해제">🔒 잠금</button>
+      <button id="btn-flip-h" class="cmd-btn" title="좌우 반전">⇋ 좌우</button>
+      <button id="btn-flip-v" class="cmd-btn" title="상하 반전">⇅ 상하</button>
+      <button id="btn-front" class="cmd-btn" title="맨 앞으로">▲ 앞</button>
+      <button id="btn-back" class="cmd-btn" title="맨 뒤로">▼ 뒤</button>
+    </div>
+    <div class="cmd-group" aria-label="정렬">
+      <button id="btn-align-left" class="cmd-btn" title="왼쪽 정렬 (다중 선택)">⇤ 좌</button>
+      <button id="btn-align-hcenter" class="cmd-btn" title="가로 중앙 정렬">↔ 중</button>
+      <button id="btn-align-right" class="cmd-btn" title="오른쪽 정렬">⇥ 우</button>
+      <button id="btn-align-top" class="cmd-btn" title="위쪽 정렬">⤒ 상</button>
+      <button id="btn-align-vcenter" class="cmd-btn" title="세로 중앙 정렬">↕ 중</button>
+      <button id="btn-align-bottom" class="cmd-btn" title="아래쪽 정렬">⤓ 하</button>
+      <button id="btn-dist-h" class="cmd-btn" title="3개 이상 선택 시 가로 간격을 동일하게">가로 등간격</button>
+      <button id="btn-dist-v" class="cmd-btn" title="3개 이상 선택 시 세로 간격을 동일하게">세로 등간격</button>
+    </div>
+    <div class="cmd-group" aria-label="도구">
+      <button id="btn-group" class="cmd-btn" title="선택 객체를 한 그룹으로">그룹화</button>
+      <button id="btn-ungroup" class="cmd-btn" title="그룹 해제">해제</button>
+      <button id="btn-add-pipe-inlet" class="cmd-btn" title="급수 배관 그리기 (더블클릭으로 완료)">급수 배관 (Inlet)</button>
+      <button id="btn-add-pipe-drain" class="cmd-btn" title="배수 배관 그리기 (더블클릭으로 완료)">배수 배관 (Drain)</button>
+      <button id="btn-renumber" class="cmd-btn" title="병상 번호를 HD1부터 행→열 순으로 재부여">번호 재정렬</button>
+      <button id="btn-delete" class="cmd-btn danger" title="선택 삭제 (Del)">🗑 삭제</button>
+    </div>
+  </div>
+
   <div id="main-layout">
     <!-- ───────── 좌측 에셋 툴바 (카테고리 클릭 시 Sub 항목 펼침) ───────── -->
     <aside id="asset-toolbar">
@@ -85,50 +117,6 @@
             <input type="color" id="custom-color" value="#8BC34A" title="색상" />
           </div>
           <button id="btn-add-custom" class="tool-btn">+ 시설 추가</button>
-        </div>
-      </details>
-
-      <details class="tb-section">
-        <summary>편집</summary>
-        <div class="tb-body">
-          <div class="edit-grid">
-            <button id="btn-undo" class="mini-btn" title="실행 취소 (Ctrl+Z)">↩ 취소</button>
-            <button id="btn-redo" class="mini-btn" title="다시 실행 (Ctrl+Y)">↪ 재실행</button>
-            <button id="btn-duplicate" class="mini-btn" title="복제 (Ctrl+D) — 크기 조정 상태 그대로 복제">⧉ 복제</button>
-            <button id="btn-lock" class="mini-btn" title="선택 객체 잠금/해제">🔒 잠금</button>
-            <button id="btn-flip-h" class="mini-btn" title="좌우 반전">⇋ 좌우</button>
-            <button id="btn-flip-v" class="mini-btn" title="상하 반전">⇅ 상하</button>
-            <button id="btn-front" class="mini-btn" title="맨 앞으로">▲ 앞으로</button>
-            <button id="btn-back" class="mini-btn" title="맨 뒤로">▼ 뒤로</button>
-          </div>
-        </div>
-      </details>
-
-      <details class="tb-section">
-        <summary>정렬 (다중 선택)</summary>
-        <div class="tb-body">
-          <div class="edit-grid">
-            <button id="btn-align-left" class="mini-btn" title="왼쪽 정렬">⇤ 좌</button>
-            <button id="btn-align-hcenter" class="mini-btn" title="가로 중앙 정렬">↔ 중</button>
-            <button id="btn-align-right" class="mini-btn" title="오른쪽 정렬">⇥ 우</button>
-            <button id="btn-align-top" class="mini-btn" title="위쪽 정렬">⤒ 상</button>
-            <button id="btn-align-vcenter" class="mini-btn" title="세로 중앙 정렬">↕ 중</button>
-            <button id="btn-align-bottom" class="mini-btn" title="아래쪽 정렬">⤓ 하</button>
-          </div>
-          <button id="btn-dist-h" class="tool-btn" title="3개 이상 선택 시 가로 간격을 동일하게">가로 등간격 배치</button>
-          <button id="btn-dist-v" class="tool-btn" title="3개 이상 선택 시 세로 간격을 동일하게">세로 등간격 배치</button>
-        </div>
-      </details>
-
-      <details class="tb-section">
-        <summary>도구</summary>
-        <div class="tb-body">
-          <button id="btn-group" class="tool-btn">선택 객체 그룹화</button>
-          <button id="btn-ungroup" class="tool-btn">그룹 해제</button>
-          <button id="btn-add-pipe-inlet" class="tool-btn">급수 배관 (Inlet)</button>
-          <button id="btn-add-pipe-drain" class="tool-btn">배수 배관 (Drain)</button>
-          <button id="btn-renumber" class="tool-btn">병상 번호 재정렬</button>
-          <button id="btn-delete" class="tool-btn danger">선택 삭제 (Del)</button>
         </div>
       </details>
 
