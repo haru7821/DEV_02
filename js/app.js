@@ -43,12 +43,7 @@
     $("legend").appendChild(li);
   }
 
-  /* Auto Modeling 시설 체크박스 — 기본 선택(필수 시설은 항상 포함) */
-  const FACILITY_DEFAULTS = {
-    water_treatment: true, nurse_station: true, changing_room: true,
-    toilet: true, storage: true, isolation_room: true,
-  };
-
+  /* Auto Modeling 시설 체크박스 — 기본값: 전체 선택 (정수실은 필수 고정) */
   function buildFacilityChecks() {
     const wrap = $("facility-checks");
     Object.entries(equipmentData)
@@ -56,8 +51,8 @@
       .forEach(([k, s]) => {
         const label = document.createElement("label");
         label.className = "fac-check";
-        label.innerHTML = `<input type="checkbox" data-key="${k}"
-          ${FACILITY_DEFAULTS[k] ? "checked" : ""} ${k === "water_treatment" ? "checked disabled" : ""} />
+        label.innerHTML = `<input type="checkbox" data-key="${k}" checked
+          ${k === "water_treatment" ? "disabled" : ""} />
           ${s.label}${k === "water_treatment" ? " (필수)" : ""}`;
         wrap.appendChild(label);
       });
@@ -322,6 +317,7 @@
       const facilities = [...new Set(["water_treatment",
         ...[...document.querySelectorAll("#facility-checks input:checked")].map((el) => el.dataset.key)])];
       FloorCanvas.setModuleWidth(toCM(+$("module-width").value));
+      FloorCanvas.setStationSeats(+$("station-seats").value);
       const r = FloorCanvas.autoModel({
         targetBeds: +$("target-beds").value,
         facilities,

@@ -277,6 +277,14 @@ const equipmentData = {
     type: "equipment", category: "wt",
   },
   // ── 가구/위생기구 (실별 기본 오브젝트, category:"furn") ──
+  station_desk2: {
+    label: "간호 데스크 (2인 책상+의자)",
+    shortLabel: "2인",
+    width: 160, height: 100,
+    color: "#F57C00",
+    type: "furniture", category: "furn",
+    symbol: "desk2",          // 책상 + 의자 2개 기호 (canvas.js)
+  },
   counter_desk: {
     label: "카운터/데스크",
     shortLabel: "DESK",
