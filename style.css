@@ -1,0 +1,197 @@
+/* ═══════════ 기본 레이아웃 ═══════════ */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  font-size: 14px;
+  color: #222;
+  background: #eceff1;
+  overflow: hidden;
+}
+
+/* ═══════════ 상단 네비게이션 ═══════════ */
+#top-nav {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  height: 52px;
+  padding: 0 16px;
+  background: #263238;
+  color: #fff;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.nav-title { font-weight: 700; font-size: 15px; white-space: nowrap; }
+
+.nav-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-left: 1px solid #455a64;
+  white-space: nowrap;
+}
+
+#top-nav label { font-size: 12px; color: #cfd8dc; }
+
+#top-nav input[type="number"] {
+  width: 70px;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 4px;
+}
+
+#top-nav select { padding: 4px; border-radius: 4px; border: none; }
+
+#top-nav button {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  background: #546e7a;
+  color: #fff;
+  cursor: pointer;
+  font-size: 13px;
+}
+#top-nav button:hover { background: #607d8b; }
+#top-nav button.primary { background: #1976d2; }
+#top-nav button.primary:hover { background: #2196f3; }
+#top-nav button.accent { background: #00897b; }
+#top-nav button.accent:hover { background: #00a693; }
+#top-nav button.warn { background: #e65100; }
+#top-nav button.warn:hover { background: #f57c00; }
+
+/* ═══════════ 3단 메인 레이아웃 ═══════════ */
+#main-layout {
+  display: flex;
+  height: calc(100% - 52px);
+}
+
+/* ── 좌측 에셋 툴바 ── */
+#asset-toolbar {
+  width: 220px;
+  flex-shrink: 0;
+  background: #fff;
+  border-right: 1px solid #cfd8dc;
+  padding: 14px;
+  overflow-y: auto;
+}
+
+#asset-toolbar h3, #property-panel h3 {
+  font-size: 12px;
+  color: #78909c;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 16px 0 8px;
+}
+#asset-toolbar h3:first-child { margin-top: 0; }
+
+.asset-btn, .tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border: 1px solid #cfd8dc;
+  border-radius: 6px;
+  background: #fafafa;
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+}
+.asset-btn:hover, .tool-btn:hover { background: #e3f2fd; border-color: #90caf9; }
+.tool-btn.danger:hover { background: #ffebee; border-color: #ef9a9a; }
+
+.asset-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+#legend { list-style: none; font-size: 12px; color: #546e7a; }
+#legend li { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+
+/* ── 중앙 캔버스 ── */
+#canvas-wrap {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  /* 그리드 배경 : Fabric 캔버스 자체가 투명 그리드 위에 놓임 */
+  background-color: #f5f7f8;
+  background-image:
+    linear-gradient(#dde3e6 1px, transparent 1px),
+    linear-gradient(90deg, #dde3e6 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+#canvas-hint {
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
+  font-size: 11px;
+  color: #90a4ae;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 3px 8px;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+/* ── 우측 속성 패널 ── */
+#property-panel {
+  width: 240px;
+  flex-shrink: 0;
+  background: #fff;
+  border-left: 1px solid #cfd8dc;
+  padding: 14px;
+  overflow-y: auto;
+}
+
+#prop-empty { font-size: 13px; color: #b0bec5; }
+
+.prop-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.prop-row span:first-child { color: #546e7a; }
+.prop-row input {
+  width: 110px;
+  padding: 4px 6px;
+  border: 1px solid #cfd8dc;
+  border-radius: 4px;
+  text-align: right;
+}
+
+#validation-report {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #546e7a;
+  word-break: keep-all;
+}
+#validation-report .ok { color: #2e7d32; font-weight: 600; }
+#validation-report .error { color: #c62828; font-weight: 600; }
+#validation-report ul { margin: 6px 0 6px 16px; }
+
+/* ═══════════ 토스트 경고 ═══════════ */
+#toast {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 60%;
+  padding: 12px 20px;
+  background: #c62828;
+  color: #fff;
+  border-radius: 8px;
+  font-size: 14px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  white-space: pre-line;
+}
+#toast.info { background: #1565c0; }

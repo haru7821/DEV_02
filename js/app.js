@@ -1,0 +1,235 @@
+/**
+ * app.js — 메인 실행 파일 (UI 초기화 + 이벤트 리스너 등록)
+ */
+(() => {
+  const $ = (id) => document.getElementById(id);
+
+  /* ───────── 토스트 알림 ───────── */
+  let toastTimer = null;
+  function toast(msg, type = "error", ms = 4000) {
+    const el = $("toast");
+    el.textContent = msg;
+    el.className = type;
+    el.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.hidden = true; }, ms);
+  }
+
+  /* ───────── 좌측 툴바: 에셋 버튼 / 범례 자동 생성 ───────── */
+  function buildToolbar() {
+    const btnWrap = $("equipment-buttons");
+    const legend = $("legend");
+    Object.entries(equipmentData).forEach(([key, spec]) => {
+      const btn = document.createElement("button");
+      btn.className = "asset-btn";
+      btn.innerHTML = `<span class="asset-swatch" style="background:${spec.color}"></span>${spec.label}
+        <small style="margin-left:auto;color:#90a4ae">${spec.width}×${spec.height}</small>`;
+      btn.addEventListener("click", () => FloorCanvas.addEquipment(key));
+      btnWrap.appendChild(btn);
+
+      const li = document.createElement("li");
+      li.innerHTML = `<span class="asset-swatch" style="background:${spec.color}"></span>${spec.label}`;
+      legend.appendChild(li);
+    });
+  }
+
+  /* ───────── 우측 속성 패널 ───────── */
+  function bindPropertyPanel(canvas) {
+    const show = (o) => {
+      if (!o || !o.meta) { $("prop-form").hidden = true; $("prop-empty").hidden = false; return; }
+      $("prop-form").hidden = false;
+      $("prop-empty").hidden = true;
+      $("prop-name").value = o.meta.label ?? o.meta.key;
+      $("prop-x").value = Math.round(o.left);
+      $("prop-y").value = Math.round(o.top);
+      $("prop-w").value = Math.round(o.getScaledWidth());
+      $("prop-h").value = Math.round(o.getScaledHeight());
+      $("prop-angle").value = Math.round(o.angle);
+      $("prop-water").textContent = o.meta.requiresWater ? "예 (RO 배관 필수)" : "아니오";
+    };
+
+    canvas.on("selection:created", (e) => show(e.selected?.[0]));
+    canvas.on("selection:updated", (e) => show(e.selected?.[0]));
+    canvas.on("selection:cleared", () => show(null));
+    canvas.on("object:modified", (e) => show(e.target));
+    canvas.on("object:moving", (e) => show(e.target));
+
+    const apply = () => {
+      const o = canvas.getActiveObject();
+      if (!o) return;
+      o.set({ left: +$("prop-x").value, top: +$("prop-y").value, angle: +$("prop-angle").value });
+      const w = +$("prop-w").value, h = +$("prop-h").value;
+      if (w > 0) o.set("scaleX", w / o.width);
+      if (h > 0) o.set("scaleY", h / o.height);
+      o.setCoords();
+      canvas.requestRenderAll();
+    };
+    ["prop-x", "prop-y", "prop-w", "prop-h", "prop-angle"].forEach((id) =>
+      $(id).addEventListener("change", apply)
+    );
+  }
+
+  /* ───────── 검증 실행 + 결과 리포트 ───────── */
+  function runValidation() {
+    const canvas = FloorCanvas.getCanvas();
+    const result = Validator.run(canvas, FloorCanvas.getObjects());
+    const report = $("validation-report");
+    const lines = [];
+
+    lines.push(`병상 수: <b>${result.spacing.bedCount}</b>개`);
+    if (result.spacing.violations.length) {
+      lines.push(`<span class="error">✖ 병상 간격 위반 ${result.spacing.violations.length}건</span>`);
+      lines.push("<ul>" + result.spacing.violations.map((v) =>
+        `<li>간격 ${v.gap}cm &lt; 기준 ${MEDICAL_RULES.MIN_BED_GAP_CM}cm</li>`).join("") + "</ul>");
+    } else if (result.spacing.bedCount >= 2) {
+      lines.push(`<span class="ok">✔ 모든 병상 간격 ${MEDICAL_RULES.MIN_BED_GAP_CM}cm 이상</span>`);
+    }
+
+    if (result.water.length) {
+      lines.push(`<span class="error">✖ 배관 동선 경고 ${result.water.length}건</span>`);
+      lines.push("<ul>" + result.water.map((w) => `<li>${w.msg}</li>`).join("") + "</ul>");
+    } else {
+      lines.push(`<span class="ok">✔ 정수 배관 동선 이상 없음</span>`);
+    }
+
+    if (result.missing.length) {
+      lines.push(`<span class="error">✖ 필수 시설 누락: ${result.missing.join(", ")}</span>`);
+    }
+
+    report.innerHTML = lines.join("<br>");
+
+    if (result.pass) {
+      toast("✔ 모든 의료 규격 검증을 통과했습니다.", "info");
+    } else {
+      const total = result.spacing.violations.length + result.water.length + result.missing.length;
+      toast(`⚠ 규격 위반 ${total}건이 발견되었습니다.\n위반 객체가 빨간색으로 깜빡입니다. 우측 패널에서 상세 내용을 확인하세요.`);
+    }
+  }
+
+  /* ───────── PDF 가로모드 출력 ───────── */
+  function exportPDF() {
+    const { jsPDF } = window.jspdf;
+    const room = FloorCanvas.getRoom();
+    const img = FloorCanvas.exportImage();
+
+    const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const pageW = pdf.internal.pageSize.getWidth();   // 297
+    const pageH = pdf.internal.pageSize.getHeight();  // 210
+    const margin = 12, headH = 14;
+
+    // 표제란
+    pdf.setFontSize(14);
+    pdf.text("Hemodialysis Unit Floor Plan", margin, margin);
+    pdf.setFontSize(9);
+    pdf.text(`Room: ${room.width / 100}m x ${room.height / 100}m   Scale: fit-to-page   Date: ${new Date().toISOString().slice(0, 10)}`,
+      margin, margin + 6);
+    pdf.setLineWidth(0.4);
+    pdf.line(margin, margin + 9, pageW - margin, margin + 9);
+
+    // 도면 이미지 (비율 유지, 페이지에 맞춤)
+    const availW = pageW - margin * 2;
+    const availH = pageH - margin * 2 - headH;
+    const ratio = room.width / room.height;
+    let w = availW, h = w / ratio;
+    if (h > availH) { h = availH; w = h * ratio; }
+    pdf.addImage(img, "PNG", margin + (availW - w) / 2, margin + headH + (availH - h) / 2, w, h);
+
+    pdf.save("dialysis-room-floorplan.pdf");
+    toast("PDF(가로모드) 파일이 다운로드되었습니다.", "info");
+  }
+
+  /* ───────── JSON 저장 / 열기 ───────── */
+  function saveJSON() {
+    const blob = new Blob([JSON.stringify(FloorCanvas.toJSON(), null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "dialysis-room-plan.json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function loadJSONFile(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        FloorCanvas.loadJSON(JSON.parse(reader.result), () => toast("도면을 불러왔습니다.", "info"));
+      } catch (e) {
+        toast("JSON 파일을 읽을 수 없습니다: " + e.message);
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  /* ───────── 도면 사진 배경 불러오기 ───────── */
+  function loadImageFile(file) {
+    const realW = prompt("도면 사진의 실제 가로 길이를 cm로 입력하세요.\n(예: 15m → 1500)", "1500");
+    if (!realW || isNaN(+realW)) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      FloorCanvas.setBackgroundImage(reader.result, +realW);
+      toast("도면 사진을 배경으로 설정했습니다. 사진 위에 장비를 배치하세요.", "info");
+    };
+    reader.readAsDataURL(file);
+  }
+
+  /* ───────── 초기화 ───────── */
+  document.addEventListener("DOMContentLoaded", () => {
+    FloorCanvas.init("floor-canvas");
+    buildToolbar();
+    bindPropertyPanel(FloorCanvas.getCanvas());
+
+    // 상단 네비게이션
+    $("btn-new-room").addEventListener("click", () => {
+      const w = +$("room-width").value, h = +$("room-height").value;
+      if (w < 300 || h < 300) return toast("병실 크기는 최소 3m × 3m 이상이어야 합니다.");
+      FloorCanvas.newRoom(w, h);
+      $("validation-report").textContent = "아직 검증하지 않았습니다.";
+    });
+    $("btn-load-image").addEventListener("click", () => $("image-file-input").click());
+    $("image-file-input").addEventListener("change", (e) => {
+      if (e.target.files[0]) loadImageFile(e.target.files[0]);
+      e.target.value = "";
+    });
+    $("snap-size").addEventListener("change", (e) => FloorCanvas.setSnap(+e.target.value));
+    $("btn-auto-layout").addEventListener("click", () => {
+      // 배경 도면 사진이 있으면 사진 크기를 유지, 없으면 입력값으로 새 도면 생성
+      if (!FloorCanvas.getCanvas().backgroundImage) {
+        const w = +$("room-width").value, h = +$("room-height").value;
+        if (w < 300 || h < 300) return toast("병실 크기는 최소 3m × 3m 이상이어야 합니다.");
+        FloorCanvas.newRoom(w, h);
+      }
+      const { beds } = FloorCanvas.autoLayout();
+      toast(`자동 배치 완료: 병상 ${beds}개 + 부속실 + 정수 배관.\n'검증' 버튼으로 규격을 확인하세요.`, "info", 5000);
+    });
+    $("btn-validate").addEventListener("click", runValidation);
+    $("btn-save-json").addEventListener("click", saveJSON);
+    $("btn-load-json").addEventListener("click", () => $("json-file-input").click());
+    $("json-file-input").addEventListener("change", (e) => {
+      if (e.target.files[0]) loadJSONFile(e.target.files[0]);
+      e.target.value = "";
+    });
+    $("btn-export-pdf").addEventListener("click", exportPDF);
+
+    // 좌측 도구
+    $("btn-group").addEventListener("click", () =>
+      FloorCanvas.groupSelection() || toast("먼저 Shift 클릭으로 두 개 이상 객체를 선택하세요."));
+    $("btn-ungroup").addEventListener("click", () =>
+      FloorCanvas.ungroupSelection() || toast("해제할 그룹을 선택하세요."));
+    $("btn-add-pipe").addEventListener("click", (e) => {
+      const on = FloorCanvas.togglePipeMode();
+      e.target.textContent = on ? "배관 그리기 종료 (더블클릭)" : "정수 배관 그리기";
+      if (on) toast("캔버스를 클릭해 배관 경로를 찍고, 더블클릭으로 완료하세요.", "info");
+    });
+    $("btn-delete").addEventListener("click", FloorCanvas.deleteSelection);
+
+    // 키보드
+    document.addEventListener("keydown", (e) => {
+      if (e.target.tagName === "INPUT") return;
+      if (e.key === "Delete" || e.key === "Backspace") FloorCanvas.deleteSelection();
+      if (e.key === "Escape") {
+        FloorCanvas.finishPipe();
+        $("btn-add-pipe").textContent = "정수 배관 그리기";
+      }
+    });
+  });
+})();

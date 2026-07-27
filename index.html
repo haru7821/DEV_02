@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>인공신장실 도면 에디터</title>
+  <link rel="stylesheet" href="style.css" />
+  <!-- Fabric.js : 캔버스 객체 제어 (오프라인 환경 대비 로컬 번들) -->
+  <script src="vendor/fabric.min.js"></script>
+  <!-- jsPDF : PDF(가로모드) 출력 -->
+  <script src="vendor/jspdf.umd.min.js"></script>
+</head>
+<body>
+  <!-- ───────── 상단 네비게이션 ───────── -->
+  <header id="top-nav">
+    <div class="nav-title">🏥 인공신장실 도면 에디터</div>
+
+    <div class="nav-group">
+      <label>가로(cm) <input type="number" id="room-width" value="1500" min="300" step="10" /></label>
+      <label>세로(cm) <input type="number" id="room-height" value="1000" min="300" step="10" /></label>
+      <button id="btn-new-room" title="입력한 크기로 병실 외곽을 새로 그립니다">새 도면</button>
+      <button id="btn-load-image" title="기존 도면 사진을 배경으로 불러옵니다">도면 사진 불러오기</button>
+      <input type="file" id="image-file-input" accept="image/*" hidden />
+    </div>
+
+    <div class="nav-group">
+      <label>스냅
+        <select id="snap-size">
+          <option value="10" selected>10cm</option>
+          <option value="50">50cm</option>
+          <option value="0">끄기</option>
+        </select>
+      </label>
+      <button id="btn-auto-layout" class="accent" title="탈의실·화장실·창고·간호사실·병상·배관을 자동 배치합니다">자동 배치</button>
+      <button id="btn-validate" class="warn" title="병상 간격 / 배관 동선 등 의료 규격을 검증합니다">검증</button>
+    </div>
+
+    <div class="nav-group">
+      <button id="btn-save-json">JSON 저장</button>
+      <button id="btn-load-json">JSON 열기</button>
+      <input type="file" id="json-file-input" accept=".json" hidden />
+      <button id="btn-export-pdf" class="primary">PDF 출력 (가로)</button>
+    </div>
+  </header>
+
+  <div id="main-layout">
+    <!-- ───────── 좌측 에셋 툴바 ───────── -->
+    <aside id="asset-toolbar">
+      <h3>병상 / 장비</h3>
+      <div id="equipment-buttons"><!-- assets.js 데이터로 자동 생성 --></div>
+
+      <h3>도구</h3>
+      <button id="btn-group" class="tool-btn">선택 객체 그룹화</button>
+      <button id="btn-ungroup" class="tool-btn">그룹 해제</button>
+      <button id="btn-add-pipe" class="tool-btn">정수 배관 그리기</button>
+      <button id="btn-delete" class="tool-btn danger">선택 삭제 (Del)</button>
+
+      <h3>범례</h3>
+      <ul id="legend"><!-- assets.js 데이터로 자동 생성 --></ul>
+    </aside>
+
+    <!-- ───────── 중앙 캔버스 ───────── -->
+    <main id="canvas-wrap">
+      <canvas id="floor-canvas"></canvas>
+      <div id="canvas-hint">휠: 확대/축소 · Alt+드래그: 화면 이동 · Del: 삭제</div>
+    </main>
+
+    <!-- ───────── 우측 속성 패널 ───────── -->
+    <aside id="property-panel">
+      <h3>속성</h3>
+      <div id="prop-empty">객체를 선택하세요</div>
+      <div id="prop-form" hidden>
+        <div class="prop-row"><span>이름</span><input type="text" id="prop-name" readonly /></div>
+        <div class="prop-row"><span>X (cm)</span><input type="number" id="prop-x" step="10" /></div>
+        <div class="prop-row"><span>Y (cm)</span><input type="number" id="prop-y" step="10" /></div>
+        <div class="prop-row"><span>가로 (cm)</span><input type="number" id="prop-w" step="10" /></div>
+        <div class="prop-row"><span>세로 (cm)</span><input type="number" id="prop-h" step="10" /></div>
+        <div class="prop-row"><span>회전 (°)</span><input type="number" id="prop-angle" step="15" /></div>
+        <div class="prop-row"><span>정수 필요</span><span id="prop-water">-</span></div>
+      </div>
+
+      <h3>검증 결과</h3>
+      <div id="validation-report">아직 검증하지 않았습니다.</div>
+    </aside>
+  </div>
+
+  <!-- 경고 토스트 -->
+  <div id="toast" hidden></div>
+
+  <!-- 스크립트 (의존 순서 주의) -->
+  <script src="js/assets.js"></script>
+  <script src="js/canvas.js"></script>
+  <script src="js/validation.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
