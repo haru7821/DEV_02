@@ -276,6 +276,56 @@ const equipmentData = {
     color: "#F9A825",
     type: "equipment", category: "wt",
   },
+  // ── 가구/위생기구 (실별 기본 오브젝트, category:"furn") ──
+  counter_desk: {
+    label: "카운터/데스크",
+    shortLabel: "DESK",
+    width: 180, height: 60,
+    color: "#FF8F00",
+    type: "furniture", category: "furn",
+  },
+  cabinet: {
+    label: "수납장/락커",
+    shortLabel: "CAB",
+    width: 120, height: 45,
+    color: "#8D6E63",
+    type: "furniture", category: "furn",
+  },
+  chair_wait: {
+    label: "대기 의자 (3연)",
+    shortLabel: "의자×3",
+    width: 150, height: 50,
+    color: "#FDD835",
+    type: "furniture", category: "furn",
+  },
+  toilet_bowl: {
+    label: "변기",
+    shortLabel: "WC",
+    width: 40, height: 70,
+    color: "#78909C",
+    type: "furniture", category: "furn",
+  },
+  washbasin: {
+    label: "세면대",
+    shortLabel: "세면",
+    width: 55, height: 45,
+    color: "#90A4AE",
+    type: "furniture", category: "furn",
+  },
+  sink: {
+    label: "세척 싱크",
+    shortLabel: "SINK",
+    width: 100, height: 55,
+    color: "#4DB6AC",
+    type: "furniture", category: "furn",
+  },
+  shelf: {
+    label: "선반",
+    shortLabel: "SHELF",
+    width: 150, height: 40,
+    color: "#A1887F",
+    type: "furniture", category: "furn",
+  },
   // ── 건축 코어 (PS/EPS 샤프트) : 사각형 + 대각선 X 기호로 렌더링 ──
   core: {
     label: "CORE (PS/EPS)",

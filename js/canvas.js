@@ -6,7 +6,7 @@
  */
 const FloorCanvas = (() => {
   let canvas = null;          // fabric.Canvas
-  let room = { width: 1500, height: 1000 }; // 병실 내부 치수(cm)
+  let room = { width: 2500, height: 1500 }; // 병실 내부 치수(cm) — 기본 25m × 15m
   let snapSize = 10;          // 스냅 단위(cm). 0 = 끄기
   let pipeMode = false;       // 배관 그리기 모드
   let pipeType = "inlet";     // 그리는 중인 배관 타입 ("inlet" | "drain")
@@ -747,6 +747,68 @@ const FloorCanvas = (() => {
     return blueprintMode;
   }
 
+  /* ───────────────── 실별 기본 오브젝트 배치 ─────────────────
+   * 각 실의 용도에 맞는 집기·위생기구를 실 내부에 기본 배치한다.
+   * put()은 실 크기를 벗어나면 배치를 건너뛴다. */
+  function populateRoom(key, x, y, w, h) {
+    const put = (k, dx, dy, opts = {}) => {
+      const s = equipmentData[k];
+      if (!s) return null;
+      const ow = opts.width ?? s.width, oh = opts.height ?? s.height;
+      if (dx + ow > w - 8 || dy + oh > h - 8) return null; // 실 크기 초과 시 생략
+      return addEquipment(k, { left: x + dx, top: y + dy, silent: true, ...opts });
+    };
+    switch (key) {
+      case "nurse_station": // 개방면(상단) 쪽 카운터 + 후면 수납
+        put("counter_desk", 20, 12, { width: Math.min(w - 40, 320) });
+        put("cabinet", 20, h - 57);
+        break;
+      case "changing_room": // 락커 2열
+        put("cabinet", 12, 15);
+        put("cabinet", 12, 70);
+        break;
+      case "toilet":
+        put("toilet_bowl", w - 55, h - 85);
+        put("washbasin", 12, h - 60);
+        break;
+      case "storage":
+      case "linen_room": // 벽면 선반
+        put("shelf", 12, 15);
+        put("shelf", 12, 65);
+        break;
+      case "waiting_area": // 대기 의자 열
+        put("chair_wait", 15, 15);
+        put("chair_wait", 15, 75);
+        put("chair_wait", 180, 15);
+        put("chair_wait", 180, 75);
+        break;
+      case "pharmacy_room":
+      case "treatment_room":
+      case "consult_room":
+      case "office_room": // 작업대 + 수납
+        put("counter_desk", 12, 12, { width: Math.min(w - 30, 180) });
+        put("cabinet", 12, h - 57);
+        break;
+      case "laundry_room":
+      case "clean_room":
+      case "waste_room": // 세척 싱크 (+선반)
+        put("sink", 12, 12);
+        put("shelf", 12, h - 52);
+        break;
+      case "isolation_room": // 감염관리 손세정대
+        put("washbasin", w - 70, h - 60);
+        break;
+      case "water_treatment": // 정수 설비: 전처리 탱크 3연 + 펌프 + 5μ + RO
+        put("multimedia_filter", 15, 15);
+        put("softner_filter", 92, 15);
+        put("carbon_filter", 169, 15);
+        put("filter_5u", 15, 95);
+        put("pump_unit", 15, h - 62);
+        put("cwp66", w - 142, h - 95);
+        break;
+    }
+  }
+
   /* ───────────────── Auto Modeling: 랜덤 변형 자동 설계 ─────────────────
    * 선택한 시설 + 목표 병상 대수를 받아, 시드 난수로 배치 변수(서비스 존
    * 방향·통로 폭·병상 간격·시설 순서)를 바꿔가며 매번 다른 도면을 생성한다.
@@ -834,6 +896,7 @@ const FloorCanvas = (() => {
         wtTop = H - patientBandH - M - 10 - wtH;
         addEquipment("water_treatment", { left: tx, top: wtTop, width: techBandW, height: wtH, silent: true });
         innerDoor(wtTop);
+        populateRoom("water_treatment", tx, wtTop, techBandW, wtH); // 정수 설비 기본 배치
       }
       // 나머지 외부 실은 정수실 바로 위에서부터 아래→위로 적층:
       // 오염 계열(오물·세탁·세척)이 정수실과 하단 코너에 밀착 클러스터를
@@ -847,49 +910,14 @@ const FloorCanvas = (() => {
         innerDoor(ty);
         // 조건 ⑥: 오물처리실은 내부(복도) + 외부(외벽) 양방향 출구
         if (key === "waste_room") outerDoor(ty + Math.min(120, h - 130));
+        populateRoom(key, tx, ty, techBandW, h); // 실별 기본 오브젝트
         ty -= 10;
       });
     }
 
-    // ── 환자 밴드: 하단 벽 가로 배치 (세로 깊이 통일) ──
-    let patientEndX = techSide === "left" ? techBandW + 40 : M;
-    let nurseRect = null;
-    {
-      const xMax = techSide === "right" ? W - techBandW - 40 : W - M;
-      // 폭이 부족하면 우선순위가 낮은(안쪽 지원) 실부터 제외해
-      // 스테이션·대기실 등 환자 프런트 필수 실을 항상 보장한다
-      const fitKeys = [...patientKeys];
-      while (fitKeys.length &&
-             fitKeys.reduce((s, key) => s + sdim(equipmentData[key].width) + 10, 0) > xMax - patientEndX) {
-        fitKeys.shift();
-      }
-      fitKeys.forEach((key) => {
-        const spec = equipmentData[key];
-        const w = sdim(spec.width);
-        if (patientEndX + w > xMax) return;
-        const roomTop = H - patientBandH - M;
-        addEquipment(key, { left: patientEndX, top: roomTop, width: w, height: patientBandH, silent: true });
-        if (key === "nurse_station") {
-          // 조건 ①: 스테이션은 문 대신 병상 필드를 향한 개방 카운터 —
-          // 환자·장비를 항상 관찰할 수 있는 시야를 확보한다
-          const open = new fabric.Rect({
-            left: patientEndX + w * 0.2, top: roomTop - 7,
-            width: w * 0.6, height: 14,
-            fill: "#ffffff", stroke: "#FF9800", strokeWidth: 1.5, strokeDashArray: [8, 6],
-            selectable: false, evented: false,
-          });
-          open.meta = { key: "annotation", label: "스테이션 개방면(관찰 시야)" };
-          canvas.add(open);
-          nurseRect = { left: patientEndX, width: w };
-        } else {
-          // 문: 위쪽 변(복도 쪽)에 달고 실 내부(아래)로 열리는 여닫이문
-          addDoor("swing_door", { left: patientEndX + 110, top: roomTop + 90, angle: 180, silent: true });
-        }
-        patientEndX += w + 10;
-      });
-    }
-
-    // ── 주 출입구 + 동선 통로: 스테이션 바로 옆 하단 벽 ──
+    // ── 주 출입구 + 주 동선 통로: 병상 필드의 먼쪽 가장자리 ──
+    // 동선-배관 분리 설계: 주 동선을 필드 '가장자리'에 두어 병상 열·콘솔·
+    // 배관 주행선이 사람 이동 통로를 가로지르지 않게 한다
     const CD = consoleDepth;                                  // 배관 콘솔 두께
     const aisle = Math.min(400, Math.max(100, Math.round(opts.passage ?? 150))); // 마주보는 장비 사이 통로(기본 1500mm)
     // 참고 도면 분석 ③: 모든 출입문을 통과하면 바로 '통로'가 되도록
@@ -899,18 +927,55 @@ const FloorCanvas = (() => {
     const fieldX0 = techSide === "left" ? techBandW + M + DOOR_CLEAR : M + 30;
     const fieldX1 = techSide === "right" ? W - techBandW - M - DOOR_CLEAR : W - 30;
     const fieldY1 = H - patientBandH - M - DOOR_CLEAR; // 환자 밴드 문 앞 복도 위까지
-    let corridor = null;
+    const cw = Math.max(120, aisle);
+    const corridor = techSide === "left"
+      ? { x0: fieldX1 - cw, x1: fieldX1 }   // 기술 밴드 반대편 가장자리
+      : { x0: fieldX0, x1: fieldX0 + cw };
+    const doorW = 180;
+    const ex = Math.round((corridor.x0 + (cw - doorW) / 2) / 10) * 10;
+    addDoor("auto_door", { left: ex, top: H - 4, silent: true });
+
+    // ── 환자 밴드: 하단 벽 가로 배치 (세로 깊이 통일) ──
+    // 스테이션은 주 동선(출입구) 바로 옆 끝자리 — 출입구와 병상 필드 동시 관찰
+    let nurseRect = null;
     {
-      const doorW = 180;
-      let ex = nurseRect ? patientEndX + 10 : Math.round(((fieldX0 + fieldX1) / 2 - 90) / 10) * 10;
-      if (ex + doorW > W - M - 10) ex = Math.max(M + 10, (nurseRect ? nurseRect.left : W / 2) - doorW - 20);
-      addDoor("auto_door", { left: ex, top: H - 4, silent: true });
-      // 출입구 폭만큼의 세로 동선 통로 — 병상이 이 구간을 침범하지 않는다
-      const cw = Math.max(120, aisle);
-      let cc = ex + doorW / 2;
-      cc = Math.min(cc, fieldX1 - cw / 2 - 10);
-      cc = Math.max(cc, fieldX0 + cw / 2 + 10);
-      corridor = { x0: cc - cw / 2, x1: cc + cw / 2 };
+      const bandX0 = techSide === "left" ? techBandW + 40 : corridor.x1 + 10;
+      const xMax = techSide === "left" ? corridor.x0 - 10 : W - techBandW - 40;
+      // techSide=right면 출입구(왼쪽)부터 채우므로 순서를 뒤집어
+      // 간호사실이 첫 자리(출입구 옆)에 오게 한다
+      const orderKeys = techSide === "left" ? [...patientKeys] : [...patientKeys].reverse();
+      // 폭 부족 시 우선순위 낮은(안쪽 지원) 실부터 제외해 프런트 실을 보장
+      const fitKeys = [...orderKeys];
+      while (fitKeys.length &&
+             fitKeys.reduce((s, key) => s + sdim(equipmentData[key].width) + 10, 0) > xMax - bandX0) {
+        if (techSide === "left") fitKeys.shift(); else fitKeys.pop();
+      }
+      let px = bandX0;
+      fitKeys.forEach((key) => {
+        const spec = equipmentData[key];
+        const w = sdim(spec.width);
+        if (px + w > xMax) return;
+        const roomTop = H - patientBandH - M;
+        addEquipment(key, { left: px, top: roomTop, width: w, height: patientBandH, silent: true });
+        if (key === "nurse_station") {
+          // 조건 ①: 스테이션은 문 대신 병상 필드를 향한 개방 카운터 —
+          // 환자·장비를 항상 관찰할 수 있는 시야를 확보한다
+          const open = new fabric.Rect({
+            left: px + w * 0.2, top: roomTop - 7,
+            width: w * 0.6, height: 14,
+            fill: "#ffffff", stroke: "#FF9800", strokeWidth: 1.5, strokeDashArray: [8, 6],
+            selectable: false, evented: false,
+          });
+          open.meta = { key: "annotation", label: "스테이션 개방면(관찰 시야)" };
+          canvas.add(open);
+          nurseRect = { left: px, width: w };
+        } else {
+          // 문: 위쪽 변(복도 쪽)에 달고 실 내부(아래)로 열리는 여닫이문
+          addDoor("swing_door", { left: px + 110, top: roomTop + 90, angle: 180, silent: true });
+        }
+        populateRoom(key, px, roomTop, w, patientBandH); // 실별 기본 오브젝트
+        px += w + 10;
+      });
     }
 
     // ── 격리실: 기술 밴드 반대편 상단 코너 (+격리 병상) ──
@@ -922,6 +987,7 @@ const FloorCanvas = (() => {
       const ix = techSide === "left" ? W - spec.width - M : M;
       addEquipment("isolation_room", { left: ix, top: M, silent: true });
       addDoor("sliding_door", { left: ix + 60, top: M + spec.height - 4, silent: true });
+      populateRoom("isolation_room", ix, M, spec.width, spec.height); // 손세정대 등
       if (placedBeds.length < target) {
         isoBedGrp = addBedUnit(ix + 60, M + 40, true);
         placedBeds.push({ grp: isoBedGrp, rowY: M + 40 });
@@ -959,16 +1025,24 @@ const FloorCanvas = (() => {
       return row;
     };
 
-    /** 양쪽 행의 병상 구간을 합쳐 콘솔 스트립을 구간별로 깐다 */
+    /** 양쪽 행의 병상 구간을 합쳐 콘솔 스트립을 구간별로 깐다.
+     *  트렁크 쪽 구간은 기술 밴드 안쪽 벽면까지 연장 — 문 앞 복도를 가로지르는
+     *  배관이 콘솔(바닥 트렌치) 내부로 수용되어 동선 위를 지나지 않는다. */
     const layConsole = (cy, bedsAB) => {
       const iv = bedsAB.map((b) => [b.left - 15, b.left + b.width + 15])
         .sort((a, b) => a[0] - b[0]);
-      let cur = null;
+      const merged = [];
       iv.forEach(([s, e]) => {
+        const cur = merged[merged.length - 1];
         if (cur && s - cur[1] <= 50) cur[1] = Math.max(cur[1], e);
-        else { if (cur) addEquipment("bed_console", { left: cur[0], top: cy, width: cur[1] - cur[0], silent: true }); cur = [s, e]; }
+        else merged.push([s, e]);
       });
-      if (cur) addEquipment("bed_console", { left: cur[0], top: cy, width: cur[1] - cur[0], silent: true });
+      if (merged.length) {
+        if (techSide === "left") merged[0][0] = techBandW + M + 2;
+        else merged[merged.length - 1][1] = W - techBandW - M - 2;
+      }
+      merged.forEach(([s, e]) =>
+        addEquipment("bed_console", { left: s, top: cy, width: e - s, silent: true }));
     };
 
     const bands = []; // { consoleY, above: [...], below: [...] }
@@ -1032,20 +1106,40 @@ const FloorCanvas = (() => {
       canvas.add(label);
     }
 
-    // ── 배관: 정수실 → 세로 트렁크 → 밴드별 콘솔 내부 주행선 → 양면 분기 ──
+    // ── 배관: 신장실 계통 트렁크(기술 밴드 벽체 매입) → 콘솔 내부 주행 → 분기 ──
+    // 동선-배관 분리: 트렁크는 문 앞 복도가 아닌 기술 밴드 안쪽 벽체 체이스로
+    // 주행하고, 수평 주행은 항상 콘솔(트렌치) 내부를 지난다.
+    // 계통 분리: 정수실 내부 배관과 신장실 배관은 서로 연결하지 않는다 —
+    // 트렁크는 정수실 '벽면 인계점(RO 공급/배수 접속)'에서 시작한다.
     const wt = getObjects().find((o) => o.meta.key === "water_treatment");
     if (wt && bands.length) {
       const inletYOf = (cy) => Math.round(cy + CD * 0.35); // 콘솔 안 급수 주행 높이
       const drainYOf = (cy) => Math.round(cy + CD * 0.7);  // 콘솔 안 배수 주행 높이
-      const trunkX = techSide === "left" ? fieldX0 - 25 : fieldX1 + 25;
+      const trunkX = techSide === "left" ? M + techBandW - 15 : W - M - techBandW + 15; // 벽체 매입 체이스
+      const handoverY = wt.top + 15; // 정수실 상단 벽면 인계점
       const trunk = [
-        { x: techSide === "left" ? wt.left + wt.width : wt.left, y: wt.top + 100 },
-        { x: trunkX, y: wt.top + 100 },
+        { x: trunkX, y: handoverY },
         { x: trunkX, y: inletYOf(bands[0].consoleY) },
       ];
       const off = techSide === "left" ? -14 : 14; // 배수 트렁크 평행 오프셋
       addPipe(trunk, "inlet");
       addPipe(trunk.map((p) => ({ x: p.x + off, y: p.y + 14 })), "drain");
+      // 인계점 마커: 정수실 계통 ↔ 신장실 계통 분리 지점
+      const tap = new fabric.Circle({
+        left: trunkX - 10, top: handoverY - 10, radius: 10,
+        fill: "#ffffff", stroke: "#1565C0", strokeWidth: 3,
+        selectable: false, evented: false,
+      });
+      tap.meta = { key: "annotation", label: "RO 인계점" };
+      canvas.add(tap);
+      const tapLabel = new fabric.Text("RO 인계점 (계통 분리)", {
+        left: techSide === "left" ? trunkX - 25 : trunkX + 25,
+        top: handoverY + 18, fontSize: 18, fill: "#1565C0",
+        originX: techSide === "left" ? "right" : "left",
+        selectable: false, evented: false,
+      });
+      tapLabel.meta = { key: "annotation" };
+      canvas.add(tapLabel);
       bands.forEach(({ consoleY, above, below }) => {
         const all = [...above, ...below];
         const farX = techSide === "left"

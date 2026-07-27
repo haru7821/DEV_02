@@ -16,8 +16,8 @@
     <div class="nav-title">🏥 인공신장실 도면 에디터</div>
 
     <div class="nav-group">
-      <label>가로(mm) <input type="number" id="room-width" value="15000" min="3000" step="100" /></label>
-      <label>세로(mm) <input type="number" id="room-height" value="10000" min="3000" step="100" /></label>
+      <label>가로(mm) <input type="number" id="room-width" value="25000" min="3000" step="100" /></label>
+      <label>세로(mm) <input type="number" id="room-height" value="15000" min="3000" step="100" /></label>
       <label>벽두께(mm) <input type="number" id="wall-thickness" value="100" min="50" max="400" step="10" /></label>
       <label>콘솔(mm) <input type="number" id="console-depth" value="250" min="100" max="600" step="10" title="투석 장비 뒤 배관 콘솔의 두께" /></label>
       <button id="btn-new-room" title="입력한 크기로 병실 외곽을 새로 그립니다">새 도면</button>
@@ -97,6 +97,11 @@
       <details class="tb-section" open>
         <summary>병상 / 장비</summary>
         <div class="tb-body" id="equipment-buttons"><!-- assets.js 데이터로 자동 생성 --></div>
+      </details>
+
+      <details class="tb-section">
+        <summary>가구 / 위생기구</summary>
+        <div class="tb-body" id="furn-buttons"><!-- assets.js category:"furn" 항목 자동 생성 --></div>
       </details>
 
       <details class="tb-section">

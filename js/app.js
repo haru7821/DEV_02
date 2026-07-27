@@ -33,6 +33,7 @@
 
   function addEquipmentButton(key, spec) {
     const target = spec.category === "wt" ? $("wt-buttons")
+      : spec.category === "furn" ? $("furn-buttons")
       : spec.type === "room" ? $("room-buttons") : $("equipment-buttons");
     target.appendChild(makeAssetButton(spec, `${toMM(spec.width)}×${toMM(spec.height)}`,
       () => FloorCanvas.addEquipment(key)));
