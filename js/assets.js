@@ -81,7 +81,7 @@ const equipmentData = {
   },
   nurse_station: {
     label: "간호사실",
-    width: 300, height: 200,
+    width: 400, height: 250,   // 개방형 카운터 스테이션 (참고 도면 3.2~4.0m 폭)
     color: "#FF9800",
     type: "room",
   },
@@ -93,19 +93,19 @@ const equipmentData = {
   },
   toilet: {
     label: "화장실",
-    width: 150, height: 200,
+    width: 200, height: 200,   // 장애인 접근 가능 규격 (2.0×2.0m)
     color: "#607D8B",
     type: "room",
   },
   storage: {
     label: "창고",
-    width: 200, height: 200,
+    width: 300, height: 300,   // 소모품 보관 (3.0×3.0m)
     color: "#9E9E9E",
     type: "room",
   },
   isolation_room: {
     label: "격리실 (감염관리)",
-    width: 350, height: 300,
+    width: 400, height: 350,   // 1병상 격리 투석 베이 12m²+ (AusHFG 기준)
     color: "#F44336",
     type: "room",
     isolation: true,
@@ -113,55 +113,55 @@ const equipmentData = {
   // ── 실제 인공신장실 도면(대동병원 등)에서 확인되는 부속실 ──
   waiting_area: {
     label: "환자 대기실",
-    width: 300, height: 250,
+    width: 400, height: 300,   // 대기 의자 6~8석 (4.0×3.0m)
     color: "#FFC107",
     type: "room",
   },
   treatment_room: {
     label: "간호처치실",
-    width: 250, height: 200,
+    width: 300, height: 300,
     color: "#FFB74D",
     type: "room",
   },
   pharmacy_room: {
     label: "조제실",
-    width: 200, height: 200,
+    width: 250, height: 250,
     color: "#BA68C8",
     type: "room",
   },
   linen_room: {
     label: "린넨실",
-    width: 200, height: 200,
+    width: 200, height: 250,
     color: "#A1887F",
     type: "room",
   },
   laundry_room: {
     label: "세탁실",
-    width: 200, height: 200,
+    width: 250, height: 250,
     color: "#4DB6AC",
     type: "room",
   },
   waste_room: {
     label: "오물처리실",
-    width: 150, height: 200,
+    width: 200, height: 250,   // 내부/외부 양방향 반출 (2.0×2.5m)
     color: "#8D6E63",
     type: "room",
   },
   clean_room: {
     label: "기구세척실",
-    width: 200, height: 200,
+    width: 250, height: 250,
     color: "#26A69A",
     type: "room",
   },
   consult_room: {
     label: "상담실",
-    width: 200, height: 200,
+    width: 250, height: 300,
     color: "#90A4AE",
     type: "room",
   },
   office_room: {
     label: "과장실 (사무실)",
-    width: 250, height: 200,
+    width: 300, height: 300,
     color: "#B0BEC5",
     type: "room",
   },

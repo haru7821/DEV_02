@@ -34,13 +34,30 @@ const Validator = (() => {
   }
 
   /* ───────── ① 병상 이격 거리 검증 ───────── */
+  /**
+   * 등맞댐(back-to-back) 예외: 두 병상 사이 간격 구역에 배관 콘솔이 있으면
+   * 머리맡이 콘솔로 분리된 정상 배치로 간주한다 (실제 도면의 800mm 백투백 구조).
+   */
+  function consoleBetween(a, b, consoles) {
+    const xOverlap = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+    if (xOverlap <= 0) return false; // 좌우로 떨어진 병상은 해당 없음
+    const gapTop = Math.min(a.bottom, b.bottom);
+    const gapBottom = Math.max(a.top, b.top);
+    if (gapTop > gapBottom) return false;
+    return consoles.some((c) =>
+      c.top >= gapTop - 10 && c.bottom <= gapBottom + 10 &&
+      c.right > Math.max(a.left, b.left) && c.left < Math.min(a.right, b.right));
+  }
+
   function checkBedSpacing(objects) {
     const beds = objects.filter(isBed);
+    const consoles = objects.filter((o) => o.meta.key === "bed_console").map(bbox);
     const violations = [];
     for (let i = 0; i < beds.length; i++) {
       for (let j = i + 1; j < beds.length; j++) {
-        const gap = rectGap(bbox(beds[i]), bbox(beds[j]));
-        if (gap < MEDICAL_RULES.MIN_BED_GAP_CM) {
+        const ba = bbox(beds[i]), bb = bbox(beds[j]);
+        const gap = rectGap(ba, bb);
+        if (gap < MEDICAL_RULES.MIN_BED_GAP_CM && !consoleBetween(ba, bb, consoles)) {
           violations.push({ a: beds[i], b: beds[j], gap: Math.round(gap) });
         }
       }
