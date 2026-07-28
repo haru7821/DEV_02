@@ -235,11 +235,11 @@ const Validator = (() => {
   /* ───────── ④ 병상당 면적 검증 (권고안 6m²) ─────────
    * 전체 바닥 면적 기준의 근사치 — 권고안의 정확한 기준은 간호사실·창고 등을
    * 제외한 환자 점유 공간이므로, 전체 면적으로도 미달이면 확실한 위반이다. */
-  // 권고안 정의: 간호사실·창고(기기창고)·청결/세척실·오물실·린넨실 등
+  // 권고안 정의: 간호사실·창고(기기창고)·세탁실·오물실·린넨실 등
   // 지원실을 '제외'한 환자 점유 공간(N.S와 내부 복도는 '포함')을 병상 수로 나눈다
   const EXCLUDED_FROM_BED_AREA = new Set([
-    "nurse_room", "storage", "clean_room", "waste_room", "linen_room",
-    "laundry_room", "water_treatment", "repair_room", "core",
+    "nurse_room", "storage", "waste_room", "linen_room",
+    "laundry_room", "water_treatment", "core",
   ]);
 
   function checkAreaPerBed(room, bedCount, objects = []) {

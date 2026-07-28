@@ -889,15 +889,6 @@ const FloorCanvas = (() => {
       return addEquipment(k, { left: x + px, top: y + dy, silent: true, ...opts });
     };
     switch (key) {
-      case "repair_room": // 투석기 정비실: 작업대 + 부품 선반 + 세척 싱크
-        put("counter_desk", 12, 12, { width: Math.min(w - 30, 180) });
-        put("shelf", 12, h - 52);
-        put("sink", w - 115, h - 70);
-        break;
-      case "training_room": // 자가투석 교육실: 교육 테이블 + 수납
-        put("counter_desk", 15, 15, { width: Math.min(w - 40, 200) });
-        put("cabinet", 15, h - 57);
-        break;
       case "nurse_room": // 간호사실: 회의 테이블 + 락커 2열 (탈의·휴게)
         put("counter_desk", 15, 20, { width: Math.min(w - 40, 200) });
         put("cabinet", 15, h - 57);
@@ -933,13 +924,11 @@ const FloorCanvas = (() => {
         break;
       case "pharmacy_room":
       case "treatment_room":
-      case "consult_room":
-      case "office_room": // 작업대 + 수납
+      case "consult_room": // 작업대 + 수납
         put("counter_desk", 12, 12, { width: Math.min(w - 30, 180) });
         put("cabinet", 12, h - 57);
         break;
       case "laundry_room":
-      case "clean_room":
       case "waste_room": // 세척 싱크 (+선반)
         put("sink", 12, 12);
         put("shelf", 12, h - 52);
@@ -1119,10 +1108,10 @@ const FloorCanvas = (() => {
     // 목표 대수에 따라 커지고 작아진다. 계수는 '병상 수 민감도'(0~1):
     // 1.0 = 병상 수에 그대로 비례, 0 = 대수와 무관한 고정 규격(화장실·코어 등).
     const BED_SENSITIVITY = {
-      storage: 1, linen_room: 1, laundry_room: 1, waste_room: 1, clean_room: 1,
+      storage: 1, linen_room: 1, laundry_room: 1, waste_room: 1,
       waiting_area: 1, changing_room: 0.7, treatment_room: 0.7, pharmacy_room: 0.5,
-      nurse_room: 0.6, water_treatment: 0.8, repair_room: 0.5, training_room: 0.4,
-      toilet: 0.3, consult_room: 0.2, office_room: 0.2, core: 0, isolation_room: 0,
+      nurse_room: 0.6, water_treatment: 0.8,
+      toilet: 0.3, consult_room: 0.2, core: 0, isolation_room: 0,
     };
     // 기준 20병상 대비 √비례 (면적이 대수에 비례하도록 한 변은 제곱근)
     const bedFactor = Math.min(1.8, Math.max(0.65, Math.sqrt(target / 20)));
@@ -1140,11 +1129,10 @@ const FloorCanvas = (() => {
     // ── 시설 분류: 실별 특성에 따라 내부(환자 접근)/외부(후방 지원) 배치 ──
     // 외부(back-of-house) 실: 소음·오염·설비 계열 → 측면 기술 밴드(외벽 쪽)
     // 내부(patient-facing) 실: 환자가 드나드는 실 → 하단 환자 밴드(출입구 쪽)
-    // 참고 도면처럼 직원 지원실(간호사실·상담실·과장실)도 후방 블록에 둔다 —
+    // 참고 도면처럼 직원 지원실(간호사실·상담실)도 후방 블록에 둔다 —
     // 환자 프런트 밴드는 환자가 쓰는 실만 남겨 동선이 섞이지 않는다
     const TECH = ["water_treatment", "storage", "linen_room", "laundry_room",
-                  "waste_room", "clean_room", "core", "repair_room", "training_room",
-                  "nurse_room", "consult_room", "office_room"];
+                  "waste_room", "core", "nurse_room", "consult_room"];
     // ── 배치 변형 축 (시드 난수) ──
     // 서로 독립인 축(골격 8가지) × 병상 대수 연동 실 크기 × 실별 크기 변형으로
     // 매번 다른 평면이 나온다. 어느 조합이든 규격·동선 규칙은 그대로 지켜진다.
@@ -1163,15 +1151,15 @@ const FloorCanvas = (() => {
     const hasWT = chosen.includes("water_treatment");
     const hasIso = chosen.includes("isolation_room");
     // 후방 밴드 적층 순서 (값이 작을수록 위 = 환자 출입구에서 먼 쪽).
-    // 오염 계열(오물처리·세탁·기구세척)을 밴드 '상단 외곽 코너'에 모은다 —
+    // 오염 계열(오물처리·세탁)을 밴드 '상단 외곽 코너'에 모은다 —
     // 환자 주 출입구(하단)와 대각으로 가장 멀고, 상단·측면 외벽에 바로 접해
     // 오물 반출·물품 입고를 외부에서 곧바로 처리할 수 있는 서비스 코너가 된다.
-    // 그 아래로 청결(린넨·창고·코어) → 직원 지원(정비·교육·간호사실·상담·과장) →
+    // 그 아래로 청결(린넨·창고·코어) → 직원 지원(간호사실·상담) →
     // 최하단 정수실(소음원, 병상에서 최대 이격) 순으로 내려간다.
     const TECH_ORDER = {
-      waste_room: -6, laundry_room: -5, clean_room: -4,
+      waste_room: -6, laundry_room: -5,
       linen_room: -3, storage: -2, core: -1,
-      repair_room: 0, training_room: 1, nurse_room: 2, consult_room: 3, office_room: 4,
+      nurse_room: 2, consult_room: 3,
     };
     const techKeys = chosen.filter((k) => TECH.includes(k) && k !== "water_treatment")
       .sort((a, b) => (TECH_ORDER[a] ?? 9) - (TECH_ORDER[b] ?? 9));

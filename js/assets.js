@@ -163,35 +163,10 @@ const equipmentData = {
     color: "#8D6E63",
     type: "room",
   },
-  clean_room: {
-    label: "기구세척실",
-    width: 250, height: 250,
-    color: "#26A69A",
-    type: "room",
-  },
   consult_room: {
     label: "상담실",
     width: 250, height: 300,
     color: "#90A4AE",
-    type: "room",
-  },
-  office_room: {
-    label: "과장실 (사무실)",
-    width: 300, height: 300,
-    color: "#B0BEC5",
-    type: "room",
-  },
-  // ── 업로드 도면(reference-plans/)에서 확인되는 부속실 ──
-  repair_room: {
-    label: "투석기 정비실",
-    width: 250, height: 250,   // 27bed 「장비보관 등」·25BED 기계실 상당
-    color: "#78909C",
-    type: "room",
-  },
-  training_room: {
-    label: "자가투석 교육실",
-    width: 350, height: 320,   // 27bed 복막실/교육 공간 상당 (도면 치수 미기입)
-    color: "#AED581",
     type: "room",
   },
   // ── 배관 콘솔: 투석 장비 뒤(머리맡 벽면)를 따라 급수/배수 배관이 지나가는
