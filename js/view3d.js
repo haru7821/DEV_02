@@ -116,15 +116,30 @@ const View3D = (() => {
 
   /* ───────── 문짝 ─────────
    * 개구부만 뚫으면 3D가 허전하고 개폐 방향도 알 수 없다.
-   * 여닫이는 실내로 35° 열린 문짝, 미닫이·자동문은 개구부 옆으로 물린 패널로 그린다. */
+   * 문은 모두 '열린 상태'로 그린다 — 여닫이는 실내로 젖혀진 문짝,
+   * 미닫이·자동문은 개구부 밖(벽면)으로 완전히 밀려난 패널 + 상부 레일. */
   const DOOR_LEAF_T = 4;      // 문짝 두께(cm)
-  const OPEN_DEG = 35;        // 여닫이 열림 각
+  const OPEN_DEG = 80;        // 여닫이 열림 각 (거의 활짝 — 통행 가능 폭을 보여준다)
+  const WALL_T = 10;          // 벽 두께(cm) — 미닫이 패널을 벽면에 붙일 때 쓴다
+
+  /**
+   * 문의 '개구부 중심'(cm). 문 그룹의 바운딩 박스는 개폐 호(arc)까지 포함해
+   * 실내 쪽으로 치우치므로, 그룹 첫 자식(개구부 사각형)의 중심을 변환해서 쓴다.
+   * 이 값을 안 쓰면 벽 개구부가 엉뚱한 곳에 뚫리거나 아예 안 뚫린다.
+   */
+  function doorAnchor(o) {
+    const parts = o.getObjects ? o.getObjects() : null;
+    if (parts && parts.length) {
+      return fabric.util.transformPoint(parts[0].getCenterPoint(), o.calcTransformMatrix());
+    }
+    return o.getCenterPoint();
+  }
 
   function buildDoor(group, o) {
     const kind = o.meta.key;
     const dw = (doorData[kind] && doorData[kind].width) || 90;
     const mat = MAT.doorLeaf;
-    const c = o.getCenterPoint();
+    const c = doorAnchor(o);
     const wrap = new THREE.Group();
     wrap.position.set(M(c.x), 0, M(c.y));
     wrap.rotation.y = -((o.angle || 0) * Math.PI) / 180;
@@ -148,16 +163,30 @@ const View3D = (() => {
       leaf(dw / 2, dw / 2, -1, OPEN_DEG * Math.PI / 180);
     } else if (kind === "swing_door") {           // 외짝 여닫이
       leaf(dw, -dw / 2, 1, -OPEN_DEG * Math.PI / 180);
-    } else {                                      // 미닫이·자동문: 벽면에 물린 패널
-      const m = new THREE.Mesh(
-        new THREE.BoxGeometry(M(dw * 0.5), DOOR_H, M(DOOR_LEAF_T)),
-        kind === "auto_door" ? MAT.glass : mat);
-      m.position.set(-M(dw) / 4, DOOR_H / 2, 0);
-      m.castShadow = true;
-      wrap.add(m);
-      const m2 = m.clone();
-      m2.position.set(M(dw) / 4, DOOR_H / 2, M(DOOR_LEAF_T));
-      wrap.add(m2);
+    } else {                                      // 미닫이·자동문: 열린 상태
+      // 문짝을 개구부 밖으로 완전히 밀어낸다. 개구부 안에는 아무것도 두지 않아야
+      // 밖에서 봤을 때 뚫려 보이고, 통행 가능 폭이 그대로 읽힌다.
+      const glass = kind === "auto_door";
+      const pmat = glass ? MAT.glass : mat;
+      const off = M(WALL_T / 2 + DOOR_LEAF_T / 2);  // 벽 두께 밖 — 벽면에 붙은 패널
+      const panel = (len, cx) => {
+        const m = new THREE.Mesh(
+          new THREE.BoxGeometry(M(len), DOOR_H, M(DOOR_LEAF_T)), pmat);
+        m.position.set(M(cx), DOOR_H / 2, off);
+        m.castShadow = true;
+        wrap.add(m);
+      };
+      if (glass) {                 // 자동문: 양쪽으로 갈라져 완전 개방
+        panel(dw / 2, -dw * 0.75);
+        panel(dw / 2, dw * 0.75);
+      } else {                     // 미닫이 외짝: 한쪽으로 완전히 밀림
+        panel(dw, -dw);
+      }
+      // 상부 레일 — 열린 문짝이 어디에 물려 있는지 보이게 한다 (개구부 + 문짝 주차 구간)
+      const rail = new THREE.Mesh(
+        new THREE.BoxGeometry(M(dw * 2), M(6), M(DOOR_LEAF_T + 3)), MAT.console);
+      rail.position.set(glass ? 0 : -M(dw) * 0.5, DOOR_H + M(3), off);
+      wrap.add(rail);
     }
   }
 
@@ -234,10 +263,13 @@ const View3D = (() => {
 
     // 문 위치 수집 → 벽 개구부로 사용
     const doors = objs.filter((o) => o.meta.isDoor).map((o) => {
-      const r = rectOf(o);
-      return { cx: r.x + r.w / 2, cy: r.y + r.d / 2, w: Math.max(r.w, r.d) };
+      const p = doorAnchor(o);
+      // 폭은 카탈로그 값(개폐 호가 포함된 바운딩이 아니라)을 쓴다
+      const w = (doorData[o.meta.key] && doorData[o.meta.key].width)
+        || Math.min(rectOf(o).w, rectOf(o).d);
+      return { cx: p.x, cy: p.y, w: w * (o.scaleX || 1) };
     });
-    const WT = 10; // 외벽 두께(cm)
+    const WT = WALL_T; // 외벽 두께(cm)
     /** 주어진 벽 선분 위에 놓인 문들을 [s,e] 구간(벽 시작점 기준)으로 변환 */
     const gapsOn = (x, y, len, horiz, tol = 40) => doors
       .filter((d) => (horiz ? Math.abs(d.cy - y) < tol : Math.abs(d.cx - x) < tol))
