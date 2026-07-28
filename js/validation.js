@@ -196,10 +196,20 @@ const Validator = (() => {
   /* ───────── ④ 병상당 면적 검증 (권고안 6m²) ─────────
    * 전체 바닥 면적 기준의 근사치 — 권고안의 정확한 기준은 간호사실·창고 등을
    * 제외한 환자 점유 공간이므로, 전체 면적으로도 미달이면 확실한 위반이다. */
-  function checkAreaPerBed(room, bedCount) {
+  // 권고안 정의: 간호사실·창고(기기창고)·청결/세척실·오물실·린넨실 등
+  // 지원실을 '제외'한 환자 점유 공간(N.S와 내부 복도는 '포함')을 병상 수로 나눈다
+  const EXCLUDED_FROM_BED_AREA = new Set([
+    "nurse_room", "storage", "clean_room", "waste_room", "linen_room",
+    "laundry_room", "water_treatment", "repair_room", "core",
+  ]);
+
+  function checkAreaPerBed(room, bedCount, objects = []) {
     if (!bedCount) return null;
     const totalM2 = (room.width / 100) * (room.height / 100);
-    const perBed = totalM2 / bedCount;
+    const excluded = objects
+      .filter((o) => EXCLUDED_FROM_BED_AREA.has(o.meta.key))
+      .reduce((s, o) => s + (o.getScaledWidth() * o.getScaledHeight()) / 10000, 0);
+    const perBed = (totalM2 - excluded) / bedCount;
     return { perBed: Math.round(perBed * 10) / 10, ok: perBed >= MEDICAL_RULES.AREA_PER_BED_M2 };
   }
 
@@ -210,7 +220,7 @@ const Validator = (() => {
     const water = checkWaterRuns(objects);
     const foot = checkFootClearance(objects, room);
     const missing = checkRequiredRooms(objects);
-    const area = room ? checkAreaPerBed(room, spacing.bedCount) : null;
+    const area = room ? checkAreaPerBed(room, spacing.bedCount, objects) : null;
 
     const badObjects = new Set();
     spacing.violations.forEach((v) => { badObjects.add(v.a); badObjects.add(v.b); });

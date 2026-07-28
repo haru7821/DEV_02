@@ -534,17 +534,18 @@ const FloorCanvas = (() => {
       });
 
     if (key === "swing_door") {
-      // 경첩 (0,0). 문짝이 열리면 벽면(개구부 옆 벽)에 거의 붙도록
-      // 문짝을 벽과 나란한 방향으로 그리고, 90° 개폐 궤적을 표시한다.
-      parts.push(leaf([0, 0, DW * 0.06, -DW]));
-      parts.push(arc(`M ${DW * 0.06} ${-DW} A ${DW} ${DW} 0 0 1 ${DW} 0`));
+      // 경첩은 개구부 한쪽 끝(0,0). 문짝을 '열린 상태'로, 즉 옆 벽면에
+      // 나란히 접힌 모습으로 그린다 — 문이 통로를 막지 않는 배치를 나타낸다.
+      // 개폐 궤적(1/4 원호)은 닫힌 위치까지의 회전을 점선으로 표시.
+      parts.push(leaf([0, 0, 0, -DW]));                       // 벽면에 접힌 문짝
+      parts.push(arc(`M 0 ${-DW} A ${DW} ${DW} 0 0 1 ${DW} 0`)); // 개폐 궤적
     } else if (key === "double_swing_door") {
-      // 좌우 대칭 두 짝 — 각각 자기 쪽 벽면으로 열린다
+      // 양짝 — 각 문짝이 자기 쪽 벽면에 접힌다
       const hw = DW / 2;
-      parts.push(leaf([0, 0, hw * 0.06, -hw]));
-      parts.push(arc(`M ${hw * 0.06} ${-hw} A ${hw} ${hw} 0 0 1 ${hw} 0`));
-      parts.push(leaf([DW, 0, DW - hw * 0.06, -hw]));
-      parts.push(arc(`M ${DW - hw * 0.06} ${-hw} A ${hw} ${hw} 0 0 0 ${hw} 0`));
+      parts.push(leaf([0, 0, 0, -hw]));
+      parts.push(arc(`M 0 ${-hw} A ${hw} ${hw} 0 0 1 ${hw} 0`));
+      parts.push(leaf([DW, 0, DW, -hw]));
+      parts.push(arc(`M ${DW} ${-hw} A ${hw} ${hw} 0 0 0 ${hw} 0`));
     } else if (key === "auto_door") {
       // 슬라이딩 패널 2장(양쪽 벽 속으로 열림) + AUTO 표기
       const pw = DW / 2 - 4;
@@ -572,11 +573,29 @@ const FloorCanvas = (() => {
       }));
     }
 
+    // roomSide: 문이 달릴 '실의 어느 벽'인가 → 문짝이 실 안쪽으로 열리는 각도
+    //   top(실이 문 아래) 180° · bottom(실이 위) 0° · left(실이 오른쪽) 90° · right(실이 왼쪽) 270°
+    const SIDE_ANGLE = { top: 180, bottom: 0, left: 90, right: 270 };
+    const angle = opts.roomSide ? SIDE_ANGLE[opts.roomSide] : (opts.angle ?? 0);
+
     const grp = new fabric.Group(parts, {
-      left: opts.left ?? room.width / 2 - spec.width / 2,
+      left: opts.left ?? room.width / 2 - DW / 2,
       top: opts.top ?? room.height - 7,
-      angle: opts.angle ?? 0,
+      angle,
     });
+    // anchor: 벽면에서 문 '개구부 중심'이 놓일 지점.
+    // 회전 규약에 좌우되지 않도록, 그룹 변환행렬로 개구부의 실제 캔버스 좌표를
+    // 측정한 뒤 그 오차만큼 그룹을 이동시킨다 — 각도와 무관하게 정확하다.
+    if (opts.anchor) {
+      grp.setCoords();
+      const abs = fabric.util.transformPoint(
+        parts[0].getCenterPoint(), grp.calcTransformMatrix());
+      grp.set({
+        left: grp.left + (opts.anchor.x - abs.x),
+        top: grp.top + (opts.anchor.y - abs.y),
+      });
+      grp.setCoords();
+    }
     grp.meta = { key, label: spec.label, isDoor: true };
     canvas.add(grp);
     applyBlueprintToObject(grp);
@@ -635,13 +654,14 @@ const FloorCanvas = (() => {
     drawPipeRuns(topBeds, bottomBeds, bottomRowY);
 
     // ⑦ 출입문 자동 배치 (여닫이문은 모두 실 내부로 열림)
-    addDoor("auto_door", { left: nurseX - 220, top: H - 4, silent: true });     // 주 출입구 자동문
-    addDoor("swing_door", { left: 120, top: H - 170, angle: 180, silent: true }); // 탈의실 문 (위쪽 변 → 안쪽)
-    addDoor("swing_door", { left: 330, top: H - 120, angle: 180, silent: true }); // 화장실 문 (위쪽 변 → 안쪽)
-    addDoor("swing_door", { left: 324, top: 60, angle: 90, silent: true });     // 정수실 문 (오른쪽 벽 → 안쪽)
-    addDoor("swing_door", { left: 224, top: 460, angle: 90, silent: true });    // 창고 문 (오른쪽 벽 → 안쪽)
+    // 앵커(벽면 지점) + roomSide로 지정 — 문이 항상 벽에 붙고 실 안쪽으로 열린다
+    addDoor("auto_door", { anchor: { x: nurseX - 130, y: H }, roomSide: "bottom", silent: true }); // 주 출입구
+    addDoor("swing_door", { anchor: { x: M + 100, y: H - 260 }, roomSide: "top", silent: true });  // 탈의실
+    addDoor("swing_door", { anchor: { x: 295, y: H - 210 }, roomSide: "top", silent: true });      // 화장실
+    addDoor("swing_door", { anchor: { x: 310, y: 210 }, roomSide: "right", silent: true });        // 정수실
+    addDoor("swing_door", { anchor: { x: 210, y: 520 }, roomSide: "right", silent: true });        // 창고
     if (hasIsolation) {
-      addDoor("sliding_door", { left: W - 300, top: 306, silent: true });      // 격리실 하단 미닫이문
+      addDoor("sliding_door", { anchor: { x: W - isoW / 2 - M, y: 310 }, roomSide: "bottom", silent: true }); // 격리실
     }
 
     canvas.discardActiveObject();
@@ -910,12 +930,14 @@ const FloorCanvas = (() => {
    * 개방면이 병상 쪽을 향해 모든 병상 열을 관찰한다. 내부에 2인 데스크
    * 유닛(stationSeats/2 조)을 배치한다. */
   function addStationIsland(x, y, seats) {
+    // 데스크는 1열로 나란히 놓여 모두 병상(개방면)을 바라본다.
+    // 좌석 수만큼 가로로 길어지고, 뒤쪽에 직원 통행/작업 여유를 둔다.
     const desks = Math.min(4, Math.ceil((seats ?? stationSeats) / 2));
-    const perRow = desks > 2 ? 2 : 1;
-    const rows = Math.ceil(desks / perRow);
-    const bar = 35;
-    const w = 70 + perRow * 172;
-    const h = bar + 25 + rows * 112;
+    const perRow = desks;   // 1열 배치
+    const rows = 1;
+    const bar = 40;         // 후면 카운터(수납) 깊이
+    const w = 90 + perRow * 172;
+    const h = bar + 35 + rows * 112;  // 후면 카운터 + 직원 통로 + 데스크 (병상 열 깊이 안에 들어감)
     const col = "#FF9800";
     const mk = (left, top, bw, bh) => new fabric.Rect({
       left, top, width: bw, height: bh, rx: 12, ry: 12,
@@ -934,10 +956,9 @@ const FloorCanvas = (() => {
     grp.meta = { key: "nurse_station", label: "간호 스테이션 (N.S)", type: "room" };
     canvas.add(grp);
     applyBlueprintToObject(grp);
-    // U자 안쪽 2인 데스크 유닛 — 개방면(아래)을 향해 착석
+    // 2인 데스크 유닛을 1열로 — 전원이 개방면(아래=병상)을 향해 착석
     for (let i = 0; i < desks; i++) {
-      const ci = i % perRow, ri = Math.floor(i / perRow);
-      addEquipment("station_desk2", { left: x + 42 + ci * 172, top: y + bar + 8 + ri * 112, silent: true });
+      addEquipment("station_desk2", { left: x + 52 + i * 172, top: y + bar + 30, silent: true });
     }
     return { grp, w, h };
   }
@@ -1068,22 +1089,25 @@ const FloorCanvas = (() => {
        */
       const wallDoor = (kind, c, ty, h, opts = {}) => {
         const dl = opts.width ?? doorData[kind].width;
-        const cy = ty + Math.round((h - dl) / 2);           // 벽면 세로 중앙
+        const my = ty + Math.round(h / 2);                  // 벽면 세로 중앙
         const innerIsRight = techSide === "left";           // 복도 쪽이 오른쪽 변인가
         const onRight = opts.outer ? !innerIsRight : innerIsRight;
         const edge = onRight ? colX(c) + colW : colX(c);
-        if (onRight) addDoor(kind, { left: edge + 14, top: cy, angle: 90, width: opts.width, silent: true });
-        else addDoor(kind, { left: edge - 7, top: cy + dl, angle: 270, width: opts.width, silent: true });
+        // 실 기준: 오른쪽 벽이면 roomSide "right"(실이 왼쪽) → 안쪽으로 열림
+        addDoor(kind, {
+          anchor: { x: edge, y: my }, roomSide: onRight ? "right" : "left",
+          width: opts.width, silent: true,
+        });
         return onRight
-          ? { x0: edge - 100, x1: edge + 5, y0: cy - 10, y1: cy + dl + 10 }
-          : { x0: edge - 5, x1: edge + 100, y0: cy - 10, y1: cy + dl + 10 };
+          ? { x0: edge - 110, x1: edge + 5, y0: my - dl / 2 - 10, y1: my + dl / 2 + 10 }
+          : { x0: edge - 5, x1: edge + 110, y0: my - dl / 2 - 10, y1: my + dl / 2 + 10 };
       };
 
       // 정수실: 외벽 열(col 0) 맨 아래 — 환자에게서 가장 먼 코너
-      let wtTop = H - patientBandH - M - 10;
+      let wtTop = H - patientBandH - M;
       if (hasWT) {
         const wtH = sdim(equipmentData.water_treatment.height);
-        wtTop = H - patientBandH - M - 10 - wtH;
+        wtTop = H - patientBandH - M - wtH;
         addEquipment("water_treatment", { left: colX(0), top: wtTop, width: colW, height: wtH, silent: true });
         // 정수실 문: 탱크·RO 반입을 위해 1000mm 폭, 벽면 중앙
         const wtZone = wallDoor("swing_door", 0, wtTop, wtH, { width: 100 });
@@ -1093,26 +1117,40 @@ const FloorCanvas = (() => {
       // 열이 차면 안쪽 열(col 1)로 넘어간다 — 두 열 사이는 내부 복도.
       // 오염 계열(오물·세탁·세척)이 정수실과 하단 코너에 모이고,
       // 청결·직원 계열(린넨·창고·코어·간호사실·상담·과장)이 위로 간다.
-      const colTops = [wtTop - 10, H - patientBandH - M - 10];
-      [...techKeys].reverse().forEach((key) => { // waste → … → office 순으로 아래부터
+      // ① 실을 열(column)에 미리 배분: 아래(오염)부터 col0 → 넘치면 col1
+      const colAvail = [wtTop - M, techCols > 1 ? H - patientBandH - M * 2 : 0];
+      const colRooms = [[], []];
+      let ci = 0;
+      [...techKeys].reverse().forEach((key) => { // waste → … → office 순
         const h = sdim(equipmentData[key].height);
-        let c = 0;
-        if (colTops[0] - h < M) c = 1;           // 외벽 열이 차면 안쪽 열로
-        if (colTops[c] - h < M) return;          // 두 열 모두 부족하면 생략
-        colTops[c] -= h;
-        const ty2 = colTops[c];
-        addEquipment(key, { left: colX(c), top: ty2, width: colW, height: h, silent: true });
-        const zones = [];
-        if (key === "waste_room") {
-          // 오물처리실: 카트 반출이 잦아 미닫이문을 쓰고 벽면 중앙에 단다.
-          // 내부(복도) 측 + 외벽 측 양방향 출구 (조건 ⑥)
-          zones.push(wallDoor("sliding_door", c, ty2, h));
-          if (c === 0) zones.push(wallDoor("sliding_door", c, ty2, h, { outer: true }));
-        } else {
-          zones.push(wallDoor("swing_door", c, ty2, h));
+        const used = colRooms[ci].reduce((s, r) => s + r.h, 0);
+        if (used + h > colAvail[ci] && ci < techCols - 1) ci += 1;
+        if (colRooms[ci].reduce((s, r) => s + r.h, 0) + h <= colAvail[ci]) {
+          colRooms[ci].push({ key, h });
         }
-        populateRoom(key, colX(c), ty2, colW, h, zones); // 실별 기본 오브젝트 (문 앞 회피)
-        colTops[c] -= 10;
+      });
+      // ② 각 열의 남는 높이를 실들에 배분해 '정확히' 채운다 — 틈·빈 공간 0
+      colRooms.forEach((list, c) => {
+        if (!list.length) return;
+        const extra = colAvail[c] - list.reduce((s, r) => s + r.h, 0);
+        const per = Math.floor(extra / list.length / 10) * 10;
+        list.forEach((r) => { r.h += per; });
+        list[list.length - 1].h += colAvail[c] - list.reduce((s, r) => s + r.h, 0); // 꼭대기 실이 잔여 흡수
+        // ③ 아래에서 위로 벽을 공유하며 배치
+        let ty = c === 0 ? wtTop : H - patientBandH - M;
+        list.forEach(({ key, h }) => {
+          ty -= h;
+          addEquipment(key, { left: colX(c), top: ty, width: colW, height: h, silent: true });
+          const zones = [];
+          if (key === "waste_room") {
+            // 오물처리실: 미닫이문(벽면 중앙), 내부 복도 + 외벽 양방향 출구
+            zones.push(wallDoor("sliding_door", c, ty, h));
+            if (c === 0) zones.push(wallDoor("sliding_door", c, ty, h, { outer: true }));
+          } else {
+            zones.push(wallDoor("swing_door", c, ty, h));
+          }
+          populateRoom(key, colX(c), ty, colW, h, zones);
+        });
       });
       // 두 열 사이 내부 복도 표시 (후방 지원 동선)
       if (techCols > 1) {
@@ -1146,9 +1184,9 @@ const FloorCanvas = (() => {
     const corridor = techSide === "left"
       ? { x0: fieldX1 - cw, x1: fieldX1 }   // 기술 밴드 반대편 가장자리
       : { x0: fieldX0, x1: fieldX0 + cw };
-    const doorW = 180;
-    const ex = Math.round((corridor.x0 + (cw - doorW) / 2) / 10) * 10;
-    addDoor("auto_door", { left: ex, top: H - 4, silent: true });
+    // 주 출입구: 하단 외벽 중앙(주 동선 폭의 한가운데)에 자동문
+    const entranceX = Math.round((corridor.x0 + corridor.x1) / 2);
+    addDoor("auto_door", { anchor: { x: entranceX, y: H }, roomSide: "bottom", silent: true });
 
     // ── 환자 밴드: 하단 벽 가로 배치 (세로 깊이 통일) ──
     // 배치 순서: 안쪽(조제·처치) → 출입구 쪽(화장실→탈의→대기).
@@ -1164,33 +1202,43 @@ const FloorCanvas = (() => {
              fitKeys.reduce((s, key) => s + sdim(equipmentData[key].width) + 10, 0) > xMax - bandX0) {
         if (techSide === "left") fitKeys.shift(); else fitKeys.pop();
       }
+      // 남는 폭을 각 실에 비례 배분해 밴드를 정확히 채운다 —
+      // 실 사이 틈(사람이 지나갈 수 없는 슬리버)과 빈 공간을 없앤다
+      const baseW = fitKeys.reduce((s, key) => s + sdim(equipmentData[key].width), 0);
+      const slack = Math.max(0, (xMax - bandX0) - baseW);
+      const grow = fitKeys.length ? Math.floor(slack / fitKeys.length / 10) * 10 : 0;
+
       let px = bandX0;
-      fitKeys.forEach((key) => {
+      fitKeys.forEach((key, i) => {
         const spec = equipmentData[key];
-        const w = sdim(spec.width);
-        if (px + w > xMax) return;
+        // 마지막 실은 남은 폭을 모두 흡수해 밴드 끝까지 붙인다
+        const w = i === fitKeys.length - 1
+          ? Math.max(sdim(spec.width), xMax - px)
+          : sdim(spec.width) + grow;
+        if (px + w > xMax + 1) return;
         const roomTop = H - patientBandH - M;
         addEquipment(key, { left: px, top: roomTop, width: w, height: patientBandH, silent: true });
         const zones = [];
         if (key === "waiting_area") {
-          // 대기실은 주 출입구와 직접 연결 — 출입구가 있는 주 동선 쪽 벽에
-          // 양짝 여닫이문을 달아 출입구→대기실 진입 동선을 만든다
+          // 대기실은 주 출입구와 직접 연결 — 주 동선 쪽 벽에 양짝문
           const dl = doorData.double_swing_door.width;
-          const cy = roomTop + Math.round((patientBandH - dl) / 2);
-          if (techSide === "left") {
-            addDoor("double_swing_door", { left: px + w + 14, top: cy, angle: 90, silent: true });
-            zones.push({ x0: px + w - 190, x1: px + w + 5, y0: cy - 10, y1: cy + dl + 10 });
-          } else {
-            addDoor("double_swing_door", { left: px - 7, top: cy + dl, angle: 270, silent: true });
-            zones.push({ x0: px - 5, x1: px + 190, y0: cy - 10, y1: cy + dl + 10 });
-          }
+          const my = roomTop + Math.round(patientBandH / 2);
+          const onRight = techSide === "left"; // 주 동선이 오른쪽이면 오른쪽 벽
+          const edge = onRight ? px + w : px;
+          addDoor("double_swing_door", {
+            anchor: { x: edge, y: my }, roomSide: onRight ? "right" : "left", silent: true,
+          });
+          zones.push(onRight
+            ? { x0: edge - 200, x1: edge + 5, y0: my - dl / 2 - 10, y1: my + dl / 2 + 10 }
+            : { x0: edge - 5, x1: edge + 200, y0: my - dl / 2 - 10, y1: my + dl / 2 + 10 });
         } else {
-          // 그 외 실: 위쪽 변(복도 쪽)에 달고 실 내부(아래)로 열리는 여닫이문
-          addDoor("swing_door", { left: px + 110, top: roomTop + 90, angle: 180, silent: true });
-          zones.push({ x0: px + 15, x1: px + 120, y0: roomTop - 5, y1: roomTop + 100 });
+          // 그 외 실: 위쪽 변(복도 쪽) 중앙에 달고 실 내부(아래)로 열리는 문
+          const mx = px + Math.round(w / 2);
+          addDoor("swing_door", { anchor: { x: mx, y: roomTop }, roomSide: "top", silent: true });
+          zones.push({ x0: mx - 60, x1: mx + 60, y0: roomTop - 5, y1: roomTop + 110 });
         }
         populateRoom(key, px, roomTop, w, patientBandH, zones);
-        px += w + 10;
+        px += w; // 실끼리 벽을 공유 — 사이에 빈 틈을 만들지 않는다
       });
     }
 
@@ -1205,9 +1253,11 @@ const FloorCanvas = (() => {
       const isoH = Math.max(spec.height, 40 + moduleDepth + MEDICAL_RULES.FOOT_WALL_CLEARANCE_CM + 10);
       const ix = techSide === "left" ? W - isoW - M : M;
       addEquipment("isolation_room", { left: ix, top: M, width: isoW, height: isoH, silent: true });
-      addDoor("sliding_door", { left: ix + 60, top: M + isoH - 4, silent: true });
+      // 격리실 문: 아래쪽 벽(병상 필드 쪽) 중앙 미닫이
+      const isoDx = ix + Math.round(isoW / 2);
+      addDoor("sliding_door", { anchor: { x: isoDx, y: M + isoH }, roomSide: "bottom", silent: true });
       populateRoom("isolation_room", ix, M, isoW, isoH,
-        [{ x0: ix + 50, x1: ix + 190, y0: M + isoH - 100, y1: M + isoH + 5 }]); // 미닫이문 회피
+        [{ x0: isoDx - 80, x1: isoDx + 80, y0: M + isoH - 110, y1: M + isoH + 5 }]); // 미닫이문 회피
       if (placedBeds.length < target) {
         isoBedGrp = addBedUnit(ix + 30, M + 40, true);
         placedBeds.push({ grp: isoBedGrp, rowY: M + 40 });
@@ -1218,18 +1268,21 @@ const FloorCanvas = (() => {
     // ── N.S 아일랜드: 병상 필드 상단, 주 동선 옆 (참고 도면의 U자 카운터) ──
     // 개방면이 병상 쪽(아래)을 향해 모든 병상 열을 한눈에 관찰하고,
     // 주 동선에 접해 있어 출입구·처치실·조제실과의 동선이 짧다.
+    // 상단 스트립 = [격리실(코너)] + [N.S 아일랜드]. 남는 폭이 모듈 2개 미만이면
+    // 병상 밴드를 스트립 아래 전폭에서 시작해 파편·빈 포켓을 만들지 않는다.
     let nsZone = null;
+    let stripBottom = isoZone ? isoZone.bottom : 0;
     if (hasNS) {
-      const probe = { desks: Math.min(4, Math.ceil(stationSeats / 2)) };
-      const perRow = probe.desks > 2 ? 2 : 1;
-      const nsW = 70 + perRow * 172;
-      let nsX = techSide === "left" ? corridor.x0 - nsW - 20 : corridor.x1 + 20;
-      let nsY = M + 20;
-      // 격리실과 겹치면 아래로 내린다
-      if (isoZone && nsX < isoZone.right && nsX + nsW > isoZone.left) nsY = isoZone.bottom + 30;
+      const nsW = 90 + Math.min(4, Math.ceil(stationSeats / 2)) * 172; // 1열 배치 폭
+      // 격리실 안쪽(주 동선 쪽)에 바로 붙인다
+      let nsX = isoZone
+        ? (techSide === "left" ? isoZone.left - nsW - 30 : isoZone.right + 30)
+        : (techSide === "left" ? corridor.x0 - nsW - 20 : corridor.x1 + 20);
+      const nsY = M + 20;
       nsX = Math.max(fieldX0, Math.min(nsX, fieldX1 - nsW));
       const ns = addStationIsland(nsX, nsY, stationSeats);
       nsZone = { left: nsX, right: nsX + ns.w, top: nsY, bottom: nsY + ns.h };
+      stripBottom = Math.max(stripBottom, nsZone.bottom);
       // 관찰 시야 표시: 개방면(아래)에서 병상 필드로 향하는 시야각
       const eye = new fabric.Text("▽ 관찰 시야", {
         left: nsX + ns.w / 2, top: nsY + ns.h + 6, fontSize: 20, fill: "#E65100",
@@ -1238,6 +1291,11 @@ const FloorCanvas = (() => {
       eye.meta = { key: "annotation", label: "N.S 관찰 시야" };
       canvas.add(eye);
     }
+    // 스트립이 차지하고 남는 상단 폭 계산 → 모듈 2개 미만이면 밴드는 아래에서 시작
+    const stripUsed = (isoZone ? isoZone.right - isoZone.left + 45 : 0) +
+                      (nsZone ? nsZone.right - nsZone.left + 45 : 0);
+    const bandsBelowStrip = stripBottom > 0 &&
+      (fieldX1 - fieldX0) - stripUsed < moduleWidth * 2 + 40;
 
     // ── 병상 필드: 콘솔 양면(back-to-back) 밴드 구조 ──
     // 조건 ④: 하나의 배관 콘솔을 사이에 두고 위(머리↓)/아래(머리↑) 양방향으로
@@ -1267,7 +1325,7 @@ const FloorCanvas = (() => {
       let { rx0, rx1 } = bounds ?? boundsFor(yBed, yBed + MD);
       const row = [];
       let x = rx0;
-      while (x + MW <= rx1 && placedBeds.length < target) {
+      while (x + MW <= rx1) { // 목표 대수와 무관하게 행을 끝까지 채운다
         if (corridor && x + MW > corridor.x0 && x < corridor.x1) {
           x = Math.round((corridor.x1 + 10) / 10) * 10; // 주 동선 통로는 비운다
           continue;
@@ -1301,9 +1359,15 @@ const FloorCanvas = (() => {
     };
 
     const bands = []; // { consoleY, above: [...], below: [...] }
-    // 첫 밴드 위 행은 발쪽이 상단 벽을 향하므로 발-벽 이격 800mm을 확보하고 시작
+    // 첫 밴드 위 행은 발쪽이 상단 벽을 향하므로 발-벽 이격 800mm을 확보하고 시작.
+    // N.S 아일랜드가 필드 폭의 절반 이상을 차지하면 옆에 병상을 끼우는 대신
+    // 상단 띠를 통째로 스테이션에 내주고 병상 밴드는 그 아래에서 시작한다.
     let by = Math.max(M + 20, MEDICAL_RULES.FOOT_WALL_CLEARANCE_CM);
-    while (placedBeds.length < target && by + MD + CD + MD <= fieldY1) {
+    if (bandsBelowStrip) {
+      by = stripBottom + Math.max(aisle, 100); // 스트립 아래 전폭에서 시작 (회피 불필요)
+    }
+    // 빈 공간이 남지 않도록 필드가 허용하는 한 밴드를 계속 만든다 (최대 채움)
+    while (by + MD + CD + MD <= fieldY1) {
       // 양면 밴드: 위 행(머리 아래쪽) + 콘솔 + 아래 행(머리 위쪽)
       const bandBounds = boundsFor(by, by + MD + CD + 6 + MD);
       const above = fillRow(by, true, bandBounds);
@@ -1316,7 +1380,7 @@ const FloorCanvas = (() => {
       by += MD + CD + 6 + MD + aisle;
     }
     // 남은 높이에 단면(콘솔 위 머리↑) 행 하나를 추가 시도
-    if (placedBeds.length < target && by + CD + MD <= fieldY1) {
+    if (by + CD + MD <= fieldY1) {
       const single = fillRow(by + CD + 6, false);
       if (single.length) {
         layConsole(by + 3, single);
@@ -1348,9 +1412,10 @@ const FloorCanvas = (() => {
       // 격리실과 겹치는 위치면 통로 음영을 격리실 아래부터 시작
       const zoneTop = (isoZone && corridor.x1 > isoZone.left && corridor.x0 < isoZone.right)
         ? isoZone.bottom + 20 : M + 10;
+      // 주 동선은 '출입구'에서 시작해 병상 필드 끝까지 이어진다
       const zone = new fabric.Rect({
         left: corridor.x0, top: zoneTop,
-        width: corridor.x1 - corridor.x0, height: H - patientBandH - M - 10 - zoneTop,
+        width: corridor.x1 - corridor.x0, height: H - zoneTop,
         fill: "rgba(255,213,79,0.12)", stroke: "#F9A825",
         strokeWidth: 2, strokeDashArray: [18, 12],
         selectable: false, evented: false,
@@ -1358,6 +1423,19 @@ const FloorCanvas = (() => {
       zone.meta = { key: "annotation", label: "주 동선" };
       canvas.add(zone);
       const cc = (corridor.x0 + corridor.x1) / 2;
+      // 출입구 진입 화살표 (입구 → 실내)
+      const inArrow = new fabric.Triangle({
+        left: cc - 20, top: H - 95, width: 40, height: 52,
+        fill: "rgba(249,168,37,0.75)", selectable: false, evented: false,
+      });
+      inArrow.meta = { key: "annotation" };
+      canvas.add(inArrow);
+      const inText = new fabric.Text("출입구", {
+        left: cc, top: H - 42, fontSize: 24, fill: "#F57F17",
+        originX: "center", selectable: false, evented: false,
+      });
+      inText.meta = { key: "annotation" };
+      canvas.add(inText);
       for (let ay = H - patientBandH - M - 90; ay > M + 80; ay -= 320) {
         const tri = new fabric.Triangle({
           left: cc - 18, top: ay, width: 36, height: 46,
