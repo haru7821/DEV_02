@@ -710,10 +710,20 @@ const FloorCanvas = (() => {
     });
     frame.meta = { key: "module_frame", label: "모듈 경계" };
     canvas.add(frame);
+    // 투석기는 '항상 침대(환자) 기준 오른쪽'에 둔다.
+    // 머리 방향이 아래(headDown)인 행은 환자가 반대로 누우므로 환자의 오른쪽이
+    // 화면상 왼쪽이 된다 → 모듈 중심을 기준으로 침대·투석기를 좌우 반전한다.
+    const MACHINE_W = 50, BED_W = 120;
+    const gapIn = Math.max(3, Math.round((mw - BED_W - MACHINE_W) / 2)); // 장비 존 중앙
+    let bedX = x, macX = x + BED_W + gapIn;                              // 기본: [침대][투석기]
+    if (headDown) {                                                      // 반전: [투석기][침대]
+      macX = x + mw - (macX - x) - MACHINE_W;
+      bedX = x + mw - BED_W;
+    }
     // 침대는 유닛 내부이므로 inUnit으로 단독 HD 번호 부여를 건너뛰고, 유닛에 번호를 준다
-    const bed = addEquipment("dialysis_bed", { left: x, top: y, height: md, silent: true, inUnit: true });
-    const mx = x + 120 + Math.max(3, Math.round((mw - 120 - 50) / 2)); // 장비 존 중앙
-    const machine = addEquipment("dialysis_machine", { left: mx, top: headDown ? y + md - 70 : y, silent: true });
+    const bed = addEquipment("dialysis_bed", { left: bedX, top: y, height: md, silent: true, inUnit: true });
+    // 세로 위치는 머리맡(콘솔 쪽) — 배관이 콘솔에서 바로 내려온다
+    const machine = addEquipment("dialysis_machine", { left: macX, top: headDown ? y + md - 70 : y, silent: true });
     const sel = new fabric.ActiveSelection([frame, bed, machine], { canvas });
     const grp = sel.toGroup();
     grp.meta = {
