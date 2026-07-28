@@ -169,6 +169,17 @@ html, body {
   cursor: pointer;
 }
 .fac-check input { accent-color: #00897b; }
+/* 시설별 크기(mm) 입력 — 값을 바꾸면 해당 실은 지정 크기로 배치된다 */
+.fac-check .fac-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fac-check input[type="number"] {
+  width: 48px;
+  padding: 1px 2px;
+  font-size: 11px;
+  border: 1px solid #cfd8dc;
+  border-radius: 3px;
+  color: #546e7a;
+}
+.fac-check .fac-x { color: #90a4ae; font-size: 10px; }
 
 .asset-btn, .tool-btn {
   display: flex;

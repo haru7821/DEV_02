@@ -62,7 +62,9 @@
     $("legend").appendChild(li);
   }
 
-  /* Auto Modeling 시설 체크박스 — 기본값: 전체 선택 (정수실은 필수 고정) */
+  /* Auto Modeling 시설 체크박스 — 기본값: 전체 선택 (정수실은 필수 고정)
+   * 각 실의 크기(mm)를 미리 지정할 수 있다. 값을 바꾸면 해당 실은 지정 크기로
+   * 배치되고, 기본값 그대로면 자동 배분(1:1 비율 확대·틈 메우기)을 따른다. */
   function buildFacilityChecks() {
     const wrap = $("facility-checks");
     Object.entries(equipmentData)
@@ -72,9 +74,29 @@
         label.className = "fac-check";
         label.innerHTML = `<input type="checkbox" data-key="${k}" checked
           ${k === "water_treatment" ? "disabled" : ""} />
-          ${s.label}${k === "water_treatment" ? " (필수)" : ""}`;
+          <span class="fac-name" title="${s.label}">${s.label}${k === "water_treatment" ? " (필수)" : ""}</span>
+          <input type="number" data-size-w="${k}" value="${s.width * 10}" min="1000" step="100" title="${s.label} 가로(mm) — 바꾸면 지정 크기로 배치" />
+          <span class="fac-x">×</span>
+          <input type="number" data-size-h="${k}" value="${s.height * 10}" min="1000" step="100" title="${s.label} 세로(mm) — 바꾸면 지정 크기로 배치" />`;
+        // 크기 입력 클릭이 체크박스를 토글하지 않도록 한다
+        label.querySelectorAll("input[type=number]").forEach((el) =>
+          el.addEventListener("click", (e) => e.preventDefault()));
         wrap.appendChild(label);
       });
+  }
+
+  /** 시설별 크기 입력 수집(cm) — 기본값에서 바꾼 실만 '지정 크기'로 취급 */
+  function collectRoomSizes() {
+    const sizes = {};
+    document.querySelectorAll("#facility-checks input[data-size-w]").forEach((el) => {
+      const k = el.dataset.sizeW;
+      const hEl = document.querySelector(`#facility-checks input[data-size-h="${k}"]`);
+      const w = toCM(+el.value), h = toCM(+hEl.value);
+      if (w > 0 && h > 0 && (w !== equipmentData[k].width || h !== equipmentData[k].height)) {
+        sizes[k] = { w, h };
+      }
+    });
+    return sizes;
   }
 
   function buildToolbar() {
@@ -313,6 +335,23 @@
       e.target.value = "";
     });
     on("snap-size", "change", (e) => FloorCanvas.setSnap(+e.target.value));
+    // 가능 장비대수 추정: 가로(m) × 세로(m) ÷ 3.3(평 환산) ÷ 3(1병상당 3평)
+    const updateCapacity = () => {
+      const el = $("capacity-est");
+      if (!el) return;
+      const wm = (+$("room-width").value || 0) / 1000, hm = (+$("room-height").value || 0) / 1000;
+      const n = Math.floor((wm * hm) / 3.3 / 3);
+      el.textContent = n > 0 ? `약 ${n}대 (${Math.round(wm * hm)}㎡)` : "-";
+      el.dataset.beds = n;
+    };
+    on("room-width", "input", updateCapacity);
+    on("room-height", "input", updateCapacity);
+    // 클릭하면 추정 대수를 병상 대수 입력에 바로 적용
+    on("capacity-est", "click", (e) => {
+      const n = +e.target.dataset.beds || 0;
+      if (n > 0) { $("target-beds").value = n; toast(`병상 대수를 추정치 ${n}대로 설정했습니다.`, "info"); }
+    });
+    updateCapacity();
     // Auto Modeling: 선택 시설 + 목표 병상 대수로 매번 다른 랜덤 구성 생성
     on("btn-auto-model", "click", () => {
       FloorCanvas.setWallThickness(toCM(+$("wall-thickness").value));
@@ -331,13 +370,18 @@
       const r = FloorCanvas.autoModel({
         targetBeds: +$("target-beds").value,
         facilities,
-        passage: toCM(+$("passage-width").value), // 마주보는 장비 사이 통로 폭
+        roomSizes: collectRoomSizes(),                 // 실별 지정 크기(cm) — 기본값에서 바꾼 실만
+        passage: toCM(+$("passage-width").value),      // 보조통로: 마주보는 병상 사이
+        mainCorridor: toCM(+$("main-corridor").value), // 주통로: 출입구→필드 끝 주 동선
         seed: (Date.now() ^ Math.floor(Math.random() * 1e9)) >>> 0, // 누를 때마다 다른 시드
       });
       $("validation-report").textContent = "아직 검증하지 않았습니다.";
+      // 병상 대수 우선 배치로 실 크기가 축소된 경우 안내
+      const shrinkNote = r.variant.shrink < 1
+        ? `\n병상 대수 우선: 실 크기를 ${Math.round(r.variant.shrink * 100)}%로 축소해 배치했습니다.` : "";
       toast(r.placed >= r.target
-        ? `Auto Modeling 완료: 병상 ${r.placed}대 배치 (서비스 존 ${r.variant.techSide === "left" ? "좌측" : "우측"}, 통로 ${r.variant.aisle * 10}mm).\n버튼을 다시 누르면 다른 구성이 생성됩니다.`
-        : `공간 제약으로 요청 ${r.target}대 중 ${r.placed}대만 배치했습니다.\n병실 크기를 늘리거나 시설 수를 줄여보세요. (다시 누르면 다른 구성 시도)`,
+        ? `Auto Modeling 완료: 병상 ${r.placed}대 배치 (서비스 존 ${r.variant.techSide === "left" ? "좌측" : "우측"}, 주통로 ${r.variant.mainCorridor * 10}mm · 보조통로 ${r.variant.aisle * 10}mm).${shrinkNote}\n버튼을 다시 누르면 다른 구성이 생성됩니다.`
+        : `공간 제약으로 요청 ${r.target}대 중 ${r.placed}대만 배치했습니다.${shrinkNote}\n병실 크기를 늘리거나 시설 수를 줄여보세요. (다시 누르면 다른 구성 시도)`,
         r.placed >= r.target ? "info" : "error", 6000);
     });
 

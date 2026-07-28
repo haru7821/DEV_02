@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>인공신장실 도면 에디터</title>
-  <link rel="stylesheet" href="style.css?v=20260728" />
+  <link rel="stylesheet" href="style.css?v=20260728c" />
   <!-- Fabric.js : 캔버스 객체 제어 (오프라인 환경 대비 로컬 번들) -->
   <script src="vendor/fabric.min.js"></script>
   <!-- jsPDF : PDF(가로모드) 출력 -->
@@ -80,7 +80,9 @@
         <summary>⚙ Auto Modeling</summary>
         <div class="tb-body" id="auto-model-panel">
           <div class="prop-row"><span>병상 대수</span><input type="number" id="target-beds" value="20" min="1" max="100" /></div>
-          <div class="prop-row"><span>통로 폭(mm)</span><input type="number" id="passage-width" value="1500" min="800" max="4000" step="100" title="마주보는 장비 사이 사람이 이동할 통로 폭" /></div>
+          <div class="prop-row"><span>가능 대수</span><span id="capacity-est" title="도면 가로(m)×세로(m)÷3.3÷3 — 1병상당 3평 기준 추정치. 클릭하면 병상 대수에 적용됩니다." style="cursor:pointer">-</span></div>
+          <div class="prop-row"><span>주통로(mm)</span><input type="number" id="main-corridor" value="2000" min="1200" max="5000" step="100" title="출입구에서 병상 필드 끝까지 이어지는 주 동선의 폭" /></div>
+          <div class="prop-row"><span>보조통로(mm)</span><input type="number" id="passage-width" value="1500" min="800" max="4000" step="100" title="마주보는 병상 밴드 사이 간호 동선(보조통로)의 폭" /></div>
           <div class="prop-row"><span>모듈 폭(mm)</span><input type="number" id="module-width" value="1800" min="1750" max="3000" step="50" title="침대+투석기 병상 모듈의 폭 — 모듈끼리 붙여서 배치됩니다" /></div>
           <div class="prop-row"><span>모듈 길이(mm)</span><input type="number" id="module-depth" value="2200" min="1800" max="3200" step="50" title="침대+투석기 병상 모듈의 세로 길이 (침대 길이 기준)" /></div>
           <div class="prop-row"><span>스테이션 좌석</span>
@@ -180,9 +182,9 @@
   <!-- 스크립트 (의존 순서 주의) -->
   <!-- ?v= : 파일 갱신 시 브라우저가 옛 캐시를 쓰지 않도록 하는 버전 태그
        (HTML만 새로 받고 JS는 캐시된 옛 파일을 쓰면 버튼이 동작하지 않을 수 있음) -->
-  <script src="js/assets.js?v=20260728"></script>
-  <script src="js/canvas.js?v=20260728"></script>
-  <script src="js/validation.js?v=20260728"></script>
-  <script src="js/app.js?v=20260728"></script>
+  <script src="js/assets.js?v=20260728c"></script>
+  <script src="js/canvas.js?v=20260728c"></script>
+  <script src="js/validation.js?v=20260728c"></script>
+  <script src="js/app.js?v=20260728c"></script>
 </body>
 </html>
