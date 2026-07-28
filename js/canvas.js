@@ -228,6 +228,12 @@ const FloorCanvas = (() => {
     });
   }
 
+  /** 병실 치수만 변경 (캔버스는 지우지 않음) — Auto Modeling이 잠긴 객체를
+   *  보존한 채 스스로 재구성할 때 사용한다. */
+  function setRoomSize(w, h) {
+    room = { width: w, height: h };
+  }
+
   function newRoomKeepBackground(w, h) {
     const bg = canvas.backgroundImage;
     newRoom(w, h);
@@ -273,6 +279,16 @@ const FloorCanvas = (() => {
       text.set({ scaleX: s, scaleY: s });
     }
     const parts = [rect];
+    // 구조 기둥 기호: 진한 채움 + 흰 대각선 X (건축 도면의 기둥 표기)
+    if (spec.symbol === "pillar") {
+      rect.set({ fill: spec.color + "E6" });
+      parts.push(new fabric.Line(
+        [-spec.width / 2, -spec.height / 2, spec.width / 2, spec.height / 2],
+        { stroke: "#ffffff", strokeWidth: 2 }));
+      parts.push(new fabric.Line(
+        [-spec.width / 2, spec.height / 2, spec.width / 2, -spec.height / 2],
+        { stroke: "#ffffff", strokeWidth: 2 }));
+    }
     // 코어/샤프트(PS/EPS) 기호: 사각형 안에 대각선 X 두 줄
     if (spec.symbol === "cross") {
       parts.push(new fabric.Line(
@@ -993,7 +1009,21 @@ const FloorCanvas = (() => {
 
     beginBulk();
     const W = room.width, H = room.height;
+    // ── 잠금(락) 보존: 잠긴 객체는 그대로 두고 나머지 영역만 재배치한다 ──
+    const lockedObjs = getObjects().filter((o) => o.meta && o.meta.locked);
+    lockedObjs.forEach((o) => canvas.remove(o));
     newRoomKeepBackground(W, H);
+    lockedObjs.forEach((o) => { canvas.add(o); o.setCoords(); });
+    const lockedZones = lockedObjs.map((o) => {
+      const r = o.getBoundingRect(true);
+      // 잠긴 병상은 새 병상과 1m 이격이 지켜지도록 회피 여유를 크게 잡는다
+      const m = o.meta.key === "bed_unit" ? MEDICAL_RULES.MIN_BED_GAP_CM : 15;
+      return { x0: r.left - m, y0: r.top - m, x1: r.left + r.width + m, y1: r.top + r.height + m };
+    });
+    const lockedHas = (k) => lockedObjs.some((o) => o.meta.key === k);
+    /** 사각형이 잠금 구역과 겹치는가 (겹치면 해당 구역 반환) */
+    const hitLocked = (x, y, w, h) => lockedZones.find((z) =>
+      x < z.x1 && x + w > z.x0 && y < z.y1 && y + h > z.y0) || null;
     const M = 10;
 
     // ── 시설 분류: 실별 특성에 따라 내부(환자 접근)/외부(후방 지원) 배치 ──
@@ -1105,7 +1135,7 @@ const FloorCanvas = (() => {
 
       // 정수실: 외벽 열(col 0) 맨 아래 — 환자에게서 가장 먼 코너
       let wtTop = H - patientBandH - M;
-      if (hasWT) {
+      if (hasWT && !lockedHas("water_treatment")) {
         const wtH = sdim(equipmentData.water_treatment.height);
         wtTop = H - patientBandH - M - wtH;
         addEquipment("water_treatment", { left: colX(0), top: wtTop, width: colW, height: wtH, silent: true });
@@ -1140,6 +1170,7 @@ const FloorCanvas = (() => {
         let ty = c === 0 ? wtTop : H - patientBandH - M;
         list.forEach(({ key, h }) => {
           ty -= h;
+          if (lockedHas(key) || hitLocked(colX(c), ty, colW, h)) { ty += h; return; } // 잠금 보존/회피
           addEquipment(key, { left: colX(c), top: ty, width: colW, height: h, silent: true });
           const zones = [];
           if (key === "waste_room") {
@@ -1210,13 +1241,16 @@ const FloorCanvas = (() => {
 
       let px = bandX0;
       fitKeys.forEach((key, i) => {
+        if (lockedHas(key)) return; // 잠긴 동일 실이 있으면 새로 만들지 않는다
         const spec = equipmentData[key];
         // 마지막 실은 남은 폭을 모두 흡수해 밴드 끝까지 붙인다
         const w = i === fitKeys.length - 1
           ? Math.max(sdim(spec.width), xMax - px)
           : sdim(spec.width) + grow;
-        if (px + w > xMax + 1) return;
         const roomTop = H - patientBandH - M;
+        const hz = hitLocked(px, roomTop, w, patientBandH);
+        if (hz) px = Math.round((hz.x1 + 5) / 10) * 10; // 잠금 구역 뒤로 밀어 배치
+        if (px + w > xMax + 1) return;
         addEquipment(key, { left: px, top: roomTop, width: w, height: patientBandH, silent: true });
         const zones = [];
         if (key === "waiting_area") {
@@ -1246,7 +1280,12 @@ const FloorCanvas = (() => {
     let isoZone = null;
     let isoBedGrp = null;
     const placedBeds = [];
-    if (hasIso) {
+    if (hasIso && lockedHas("isolation_room")) {
+      const li = lockedObjs.find((o) => o.meta.key === "isolation_room");
+      const r = li.getBoundingRect(true);
+      isoZone = { left: r.left, right: r.left + r.width, top: r.top, bottom: r.top + r.height };
+      isoBedGrp = lockedObjs.find((o) => o.meta.key === "bed_unit" && o.meta.isolated) ?? null;
+    } else if (hasIso) {
       const spec = equipmentData.isolation_room;
       // 격리실은 병상 모듈 + 머리맡 40cm + 발쪽 이격 800mm이 들어가도록 키운다
       const isoW = Math.max(spec.width, moduleWidth + 60);
@@ -1272,7 +1311,12 @@ const FloorCanvas = (() => {
     // 병상 밴드를 스트립 아래 전폭에서 시작해 파편·빈 포켓을 만들지 않는다.
     let nsZone = null;
     let stripBottom = isoZone ? isoZone.bottom : 0;
-    if (hasNS) {
+    if (hasNS && lockedHas("nurse_station")) {
+      const ln = lockedObjs.find((o) => o.meta.key === "nurse_station");
+      const r = ln.getBoundingRect(true);
+      nsZone = { left: r.left, right: r.left + r.width, top: r.top, bottom: r.top + r.height };
+      stripBottom = Math.max(stripBottom, nsZone.bottom);
+    } else if (hasNS) {
       const nsW = 90 + Math.min(4, Math.ceil(stationSeats / 2)) * 172; // 1열 배치 폭
       // 격리실 안쪽(주 동선 쪽)에 바로 붙인다
       let nsX = isoZone
@@ -1328,6 +1372,11 @@ const FloorCanvas = (() => {
       while (x + MW <= rx1) { // 목표 대수와 무관하게 행을 끝까지 채운다
         if (corridor && x + MW > corridor.x0 && x < corridor.x1) {
           x = Math.round((corridor.x1 + 10) / 10) * 10; // 주 동선 통로는 비운다
+          continue;
+        }
+        const lz = hitLocked(x, yBed, MW, MD);
+        if (lz) { // 잠긴 객체 구역은 건너뛴다
+          x = Math.round((lz.x1 + 5) / 10) * 10;
           continue;
         }
         const grp = addBedUnit(x, yBed, false, headDown);
@@ -1566,8 +1615,9 @@ const FloorCanvas = (() => {
     canvas.discardActiveObject();
     canvas.requestRenderAll();
     endBulk();
+    const totalBeds = getObjects().filter((o) => o.meta.key === "bed_unit").length;
     return {
-      placed: placedBeds.length,
+      placed: totalBeds, // 잠긴 병상 포함 전체
       target,
       variant: {
         techSide, aisle, moduleWidth: MW, consoleDepth: CD,
@@ -1727,17 +1777,24 @@ const FloorCanvas = (() => {
     return true;
   }
 
-  /** 잠금 토글: 이동/회전/크기 조절을 막는다. 반환값 = 잠금 여부(null = 선택 없음) */
-  function toggleLockSelection() {
-    const o = canvas.getActiveObject();
-    if (!o || !o.meta) return null;
-    const lock = !o.meta.locked;
+  /** 객체에 잠금 상태를 적용 (이동/회전/크기 잠금 + 표시) */
+  function applyLockState(o, lock) {
     o.meta.locked = lock;
     o.set({
       lockMovementX: lock, lockMovementY: lock, lockRotation: lock,
       lockScalingX: lock, lockScalingY: lock,
       hasControls: !lock, opacity: lock ? 0.85 : 1,
     });
+  }
+
+  /** 잠금 토글(다중 선택 지원). 잠긴 객체는 Auto Modeling 재배치에서도 고정된다.
+   *  반환값 = 잠금 여부(null = 선택 없음) */
+  function toggleLockSelection() {
+    const objs = canvas.getActiveObjects().filter((o) => o.meta);
+    if (!objs.length) return null;
+    const lock = !objs[0].meta.locked;
+    objs.forEach((o) => applyLockState(o, lock));
+    canvas.discardActiveObject();
     canvas.requestRenderAll();
     return lock;
   }
@@ -1796,6 +1853,10 @@ const FloorCanvas = (() => {
     room = data.room;
     canvas.loadFromJSON(data.canvas, () => {
       endBulk();
+      // 잠금 상태 복원 (lockMovement 등은 직렬화되지 않으므로 meta로 재적용)
+      canvas.getObjects().forEach((o) => {
+        if (o.meta && o.meta.locked) applyLockState(o, true);
+      });
       // 불러온 도면의 HD 번호 최댓값에서 병상 카운터를 이어간다
       bedCounter = canvas.getObjects().reduce((max, o) => {
         const m = o.meta && typeof o.meta.name === "string" && o.meta.name.match(/^HD(\d+)$/);
@@ -1823,7 +1884,7 @@ const FloorCanvas = (() => {
   }
 
   return {
-    init, newRoom, setBackgroundImage, addEquipment, addPipe, addDoor,
+    init, newRoom, setRoomSize, setBackgroundImage, addEquipment, addPipe, addDoor,
     groupSelection, ungroupSelection, togglePipeMode, finishPipe,
     autoLayout, autoModel, getObjects, deleteSelection, toJSON, loadJSON, exportImage,
     fitToScreen,

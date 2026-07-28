@@ -357,6 +357,16 @@ const equipmentData = {
     color: "#A1887F",
     type: "furniture", category: "furn",
   },
+  // ── 구조 기둥: 속성 패널에서 크기(mm) 조절. 잠금(🔒)하면 Auto Modeling이
+  //    기둥을 피해서 배치한다 ──
+  pillar: {
+    label: "기둥 (구조)",
+    shortLabel: "기둥",
+    width: 50, height: 50,     // 기본 500×500mm — 속성 패널에서 조절
+    color: "#37474F",
+    type: "equipment",
+    symbol: "pillar",
+  },
   // ── 건축 코어 (PS/EPS 샤프트) : 사각형 + 대각선 X 기호로 렌더링 ──
   core: {
     label: "CORE (PS/EPS)",

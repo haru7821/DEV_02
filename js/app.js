@@ -320,7 +320,8 @@
       if (!FloorCanvas.getCanvas().backgroundImage) {
         const w = toCM(+$("room-width").value), h = toCM(+$("room-height").value);
         if (w < 300 || h < 300) return toast("병실 크기는 최소 3,000mm × 3,000mm 이상이어야 합니다.");
-        FloorCanvas.newRoom(w, h);
+        // newRoom은 잠긴 객체까지 지우므로 치수만 갱신 — 재구성은 autoModel이 수행
+        FloorCanvas.setRoomSize(w, h);
       }
       const facilities = [...new Set(["water_treatment",
         ...[...document.querySelectorAll("#facility-checks input:checked")].map((el) => el.dataset.key)])];
@@ -430,7 +431,9 @@
     on("btn-lock", "click", () => {
       const locked = FloorCanvas.toggleLockSelection();
       if (locked === null) return toast("잠글 객체를 먼저 선택하세요.");
-      toast(locked ? "선택 객체를 잠갔습니다. (이동/크기/회전 불가)" : "잠금을 해제했습니다.", "info");
+      toast(locked
+        ? "선택 객체를 잠갔습니다. Auto Modeling 시에도 고정되고 다른 영역만 재배치됩니다."
+        : "잠금을 해제했습니다.", "info", 5000);
     });
 
     // 정렬 / 등간격 배치
