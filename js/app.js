@@ -84,6 +84,7 @@
       { label: "병상 모듈 (침대+투석기)", color: "#2E7D32" }, "모듈",
       () => {
         FloorCanvas.setModuleWidth(toCM(+$("module-width").value));
+        FloorCanvas.setModuleDepth(toCM(+$("module-depth").value));
         const r = FloorCanvas.getRoom();
         FloorCanvas.addBedUnit(Math.round(r.width / 2 - 90), Math.round(r.height / 2 - 110), false);
       }));
@@ -324,6 +325,7 @@
       const facilities = [...new Set(["water_treatment",
         ...[...document.querySelectorAll("#facility-checks input:checked")].map((el) => el.dataset.key)])];
       FloorCanvas.setModuleWidth(toCM(+$("module-width").value));
+      FloorCanvas.setModuleDepth(toCM(+$("module-depth").value));
       FloorCanvas.setStationSeats(+$("station-seats").value);
       const r = FloorCanvas.autoModel({
         targetBeds: +$("target-beds").value,

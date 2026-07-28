@@ -168,6 +168,19 @@ const equipmentData = {
     color: "#B0BEC5",
     type: "room",
   },
+  // ── 실제 투석센터 프로그램에서 반복 확인되는 실 (웹 조사 반영) ──
+  repair_room: {
+    label: "투석기 정비실",
+    width: 250, height: 250,   // 모듈러 투석센터 프로그램에 반복 등장 (BOXX·Odulair)
+    color: "#78909C",
+    type: "room",
+  },
+  training_room: {
+    label: "자가투석 교육실",
+    width: 350, height: 320,   // FGI: 자가투석 교육 구역 최소 120 sq ft(11.15m²)
+    color: "#AED581",
+    type: "room",
+  },
   // ── 배관 콘솔: 투석 장비 뒤(머리맡 벽면)를 따라 급수/배수 배관이 지나가는
   //    설비 덕트. 두께(깊이)는 상단 네비 "콘솔(mm)" 입력으로 지정한다. ──
   bed_console: {
