@@ -376,13 +376,20 @@
         seed: (Date.now() ^ Math.floor(Math.random() * 1e9)) >>> 0, // 누를 때마다 다른 시드
       });
       $("validation-report").textContent = "아직 검증하지 않았습니다.";
-      // 병상 대수 우선 배치로 실 크기가 축소된 경우 안내
-      const shrinkNote = r.variant.shrink < 1
-        ? `\n병상 대수 우선: 실 크기를 ${Math.round(r.variant.shrink * 100)}%로 축소해 배치했습니다.` : "";
+      // 적용된 배치 단계를 그대로 안내한다
+      // ① 장비 우선 → ② 여유 환원 → ③ 실 축소 → ④ 대수 감축
+      const STAGE = {
+        bed: "실은 지정 크기 그대로, 병상을 우선 배치했습니다.",
+        grown: "병상 목표를 채우고 남는 공간을 실 크기에 돌려줬습니다.",
+        shrunk: `공간이 모자라 실 크기를 ${Math.round(r.variant.shrink * 100)}%로 줄여 병상 자리를 확보했습니다.`,
+        capped: `실을 ${Math.round(r.variant.shrink * 100)}%까지 줄여도 자리가 모자라 병상 대수를 ${r.placed}대로 줄였습니다.`,
+      };
+      const note = STAGE[r.variant.stage] ?? "";
+      const spec = `서비스 존 ${r.variant.techSide === "left" ? "좌측" : "우측"}, 주통로 ${r.variant.mainCorridor * 10}mm · 보조통로 ${r.variant.aisle * 10}mm`;
       toast(r.placed >= r.target
-        ? `Auto Modeling 완료: 병상 ${r.placed}대 배치 (서비스 존 ${r.variant.techSide === "left" ? "좌측" : "우측"}, 주통로 ${r.variant.mainCorridor * 10}mm · 보조통로 ${r.variant.aisle * 10}mm).${shrinkNote}\n버튼을 다시 누르면 다른 구성이 생성됩니다.`
-        : `공간 제약으로 요청 ${r.target}대 중 ${r.placed}대만 배치했습니다.${shrinkNote}\n병실 크기를 늘리거나 시설 수를 줄여보세요. (다시 누르면 다른 구성 시도)`,
-        r.placed >= r.target ? "info" : "error", 6000);
+        ? `Auto Modeling 완료: 병상 ${r.placed}대 (${spec})\n${note}\n버튼을 다시 누르면 다른 구성이 생성됩니다.`
+        : `요청 ${r.target}대 중 ${r.placed}대 배치 (${spec})\n${note}\n병실 크기를 늘리거나 시설 수를 줄여보세요.`,
+        r.placed >= r.target ? "info" : "error", 6500);
     });
 
     // ── 레이어 패널: 동선·치수 표기의 표시 / 편집 / 삭제 ──

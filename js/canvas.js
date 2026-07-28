@@ -14,6 +14,7 @@ const FloorCanvas = (() => {
   let pipePreview = null;     // 미리보기 라인
   let bedCounter = 0;         // 병상 번호(HD1, HD2, …) 순차 카운터
   let blueprintMode = false;  // 흑백 도면(청사진) 모드
+  let variantSeq = 0;         // 자동 배치 골격 순환 카운터 (연속 실행 시 16가지 순회)
 
   // ── 실행 취소/다시 실행 히스토리 ──
   let history = [];           // JSON 스냅샷 스택
@@ -1085,15 +1086,12 @@ const FloorCanvas = (() => {
     // 기준 20병상 대비 √비례 (면적이 대수에 비례하도록 한 변은 제곱근)
     const bedFactor = Math.min(1.8, Math.max(0.65, Math.sqrt(target / 20)));
     const bedScale = (k) => 1 + (bedFactor - 1) * (BED_SENSITIVITY[k] ?? 0.5);
-    /** 실별 변형 계수 (시드 난수) — 같은 대수라도 실 크기 구성이 매번 달라진다 */
-    const jitter = {};
-    Object.keys(equipmentData).forEach((k) => { jitter[k] = 0.9 + rng() * 0.25; });
-    /** 최종 기본 치수 = 스펙 × 대수 연동 × 변형 × 대수우선 축소 (지정 실은 지정값 고정) */
+    /** 최종 기본 치수 = 지정값(있으면) 또는 스펙 × 대수 연동, 그리고 단계 축소.
+     *  패널에서 직접 입력한 실은 '제공된 크기 그대로' 쓰고 대수 연동을 적용하지 않는다. */
     const bDim = (k, dim) => {
       const u = userSize(k);
       if (u) return q10(u[dim] * shrink);
-      return q10(equipmentData[k][dim === "w" ? "width" : "height"]
-        * bedScale(k) * jitter[k] * shrink);
+      return q10(equipmentData[k][dim === "w" ? "width" : "height"] * bedScale(k) * shrink);
     };
     const bW = (k) => bDim(k, "w");
     const bH = (k) => bDim(k, "h");
@@ -1109,12 +1107,15 @@ const FloorCanvas = (() => {
     // ── 배치 변형 축 (시드 난수) ──
     // 서로 독립인 축(골격 8가지) × 병상 대수 연동 실 크기 × 실별 크기 변형으로
     // 매번 다른 평면이 나온다. 어느 조합이든 규격·동선 규칙은 그대로 지켜진다.
-    const techSide = pick(["left", "right"]);        // ① 서비스 존(후방 밴드) 방향
-    const corridorSide = pick(["far", "near"]);      // ② 주 동선을 후방 밴드 반대편 | 같은 편
-    const wantTwoCols = rng() < 0.5;                 // ③ 후방 밴드 2열 구성 선호
+    // 골격은 4비트 조합(16가지)으로 정의하고, 실행할 때마다 순환시켜
+    // 연속으로 눌러도 같은 구성이 반복되지 않게 한다 (재귀 호출은 같은 조합 유지).
+    const vbits = opts._variant ?? (variantSeq = (variantSeq + 1) & 15);
+    const techSide = (vbits & 1) ? "left" : "right"; // ① 서비스 존(후방 밴드) 방향
+    const corridorSide = (vbits & 2) ? "far" : "near"; // ② 주 동선 위치
+    const wantTwoCols = !!(vbits & 4);               // ③ 후방 밴드 2열 구성 선호
     // ④ N.S 위치: 상단 스트립 | 병상 필드와 환자 밴드 사이의 '중앙 아일랜드'
     //    (25BED 도면형 — 카운터가 필드 한가운데서 모든 병상 열을 마주본다)
-    const nsIsland = rng() < 0.5;
+    const nsIsland = !!(vbits & 8);
     const hasWT = chosen.includes("water_treatment");
     const hasIso = chosen.includes("isolation_room");
     // 후방 밴드 적층 순서 (값이 작을수록 위 = 환자 출입구에서 먼 쪽).
@@ -1152,8 +1153,16 @@ const FloorCanvas = (() => {
                                hasWT ? bW("water_treatment") : 0);
     // 병상 대수 우선 축소 시 환자 밴드 깊이 하한도 함께 낮춰 병상 필드를 넓힌다
     const maxPatH0 = Math.max(Math.round(250 * Math.max(shrink, 0.7) / 10) * 10, ...patientKeys.map(bH));
-    let kScale = baseArea > 0 ? Math.sqrt((W * H * 0.5) / baseArea) : 1;
-    kScale = Math.max(1, Math.min(kScale, (W * 0.35) / maxTechW0, (H * 0.4) / maxPatH0));
+    // ── 배치 우선순위 ①: 장비(병상) 수량 우선 ──
+    // 기본은 실을 부풀리지 않고 '제공된/기본 크기 그대로' 두어 병상 공간을 먼저 확보한다.
+    // 목표 대수를 채운 뒤에만(_inflate) 남는 공간을 실에 돌려준다.
+    const inflate = !!opts._inflate;
+    let kScale = 1;
+    if (inflate && baseArea > 0) {
+      kScale = Math.sqrt((W * H * 0.5) / baseArea);
+      kScale = Math.max(1, Math.min(kScale, (W * 0.35) / maxTechW0, (H * 0.4) / maxPatH0));
+    }
+    if (inflate) {
     // 확대 배율 상한: 선택한 실이 모두 들어가도록 제한한다
     // (세로) 후방 밴드 실 높이 합 + 환자 밴드 깊이 ≤ 병실 높이
     const sumTechH = [...techKeys, ...(hasWT ? ["water_treatment"] : [])]
@@ -1168,7 +1177,8 @@ const FloorCanvas = (() => {
       const availW = W - M * 2 - 10 * (patientKeys.length + 1) - mainCw;
       kScale = Math.max(1, Math.min(kScale, availW / (sumPatW + maxTechW0)));
     }
-    // 병상 대수 우선 축소 중이거나 실 크기를 직접 지정한 경우 1:1 목표 확대를 끈다
+    }
+    // 단계 축소 중이면 확대하지 않는다
     if (shrink < 1) kScale = 1;
     const sdim = (v) => Math.round((v * kScale) / 10) * 10; // 10cm 단위로 스케일
     // 실별 배치 치수: 사용자 지정 실은 지정값 그대로, 나머지는 kScale 확대 적용
@@ -1212,7 +1222,10 @@ const FloorCanvas = (() => {
       const byEst = Math.max(M + 20, MEDICAL_RULES.FOOT_WALL_CLEARANCE_CM);
       const p = planBands(H - patientBandH - M - 130 - byEst);
       const spare = Math.max(0, p.waste - p.gaps * Math.round(aisle * 0.6));
-      patientBandH += Math.floor(spare / 10) * 10;
+      // 상한: 기본 깊이의 1.6배, 그리고 병실 높이의 35%까지 —
+      // 환자 밴드가 무한정 깊어져 후방 밴드·병상 필드를 밀어내지 않도록 한다
+      const capH = Math.min(Math.round(patientBandH * 1.6), Math.round(H * 0.35));
+      patientBandH = Math.min(capH, patientBandH + Math.floor(spare / 10) * 10);
     }
     const TECH_AISLE = 130; // 후방 밴드 두 열 사이 내부 복도(1300mm)
     // 후방 실 높이 합이 한 열에 안 들어가면 2열 구성 (참고 도면의 후방 블록)
@@ -1653,8 +1666,12 @@ const FloorCanvas = (() => {
     const stripUsed = (isoZone ? isoZone.right - isoZone.left + 45 : 0) +
                       (nsZone ? nsZone.right - nsZone.left + 45 : 0) +
                       stripZones.reduce((s, z) => s + (z.right - z.left) + 45, 0);
+    // 스트립 아래에서 시작하려면 '거기에 밴드 한 조가 들어갈 때'만 — 안 들어가면
+    // 상단부터 시작한다. 배치 범위를 행 단위로 계산하므로 스트립과 겹치는 행만
+    // 좁아지고 그 아래 행은 필드 전폭을 쓴다 (병상 수가 0이 되는 것을 막는다).
     const bandsBelowStrip = !useIsland && stripBottom > 0 &&
-      (fieldX1 - fieldX0) - stripUsed < moduleWidth * 2 + 40;
+      (fieldX1 - fieldX0) - stripUsed < moduleWidth * 2 + 40 &&
+      fieldY1 - (stripBottom + Math.max(aisle, 100)) >= moduleDepth * 2 + consoleDepth;
 
     // ── 병상 필드: 콘솔 양면(back-to-back) 밴드 구조 ──
     // 조건 ④: 하나의 배관 콘솔을 사이에 두고 위(머리↓)/아래(머리↑) 양방향으로
@@ -1670,8 +1687,10 @@ const FloorCanvas = (() => {
       let rx0 = fieldX0, rx1 = fieldX1;
       // 상단 스트립(격리실·N.S·처치실·조제실)은 한쪽 벽에 붙어 이어지므로 하나의
       // 구간으로 합쳐서 잘라낸다 — 사이사이에 병상을 끼워 넣어 조각내지 않는다
+      // 실제로 세로 구간이 겹치는 스트립만 잘라낸다 (여유 5cm) —
+      // 스트립 바로 아래 행까지 좁아져 병상이 사라지는 것을 막는다
       const hit = [isoZone, nsZone, ...stripZones]
-        .filter((z) => z && yBottom >= z.top - 40 && yTop <= z.bottom + 40);
+        .filter((z) => z && yBottom > z.top + 5 && yTop < z.bottom - 5);
       if (hit.length) {
         const left = Math.min(...hit.map((z) => z.left));
         const right = Math.max(...hit.map((z) => z.right));
@@ -1953,21 +1972,33 @@ const FloorCanvas = (() => {
     canvas.requestRenderAll();
     endBulk();
     const totalBeds = getObjects().filter((o) => o.meta.key === "bed_unit").length;
-    // ── 병상 '대수 우선' 배치: 목표에 못 미치면 실 크기를 10%씩 줄여
-    //    (사용자 지정 실 포함, 최소 60%) 같은 시드로 전체를 다시 배치한다.
-    //    단, 더 줄여도 병상이 늘지 않으면 실이 더 큰 현재 구성으로 되돌린다 —
-    //    이득 없는 축소로 실만 좁아지는 것을 막는다. ──
+    // ───────── 배치 우선순위 사다리 ─────────
+    // ① 장비(병상) 수량 우선 — 실은 제공된 크기 그대로, 병상을 최대로 채운다
+    // ② 목표를 채웠고 공간이 남으면 그 여유를 실 크기에 돌려준다 (_inflate)
+    // ③ 공간이 모자라면 실 크기를 10%씩(최소 60%) 줄여 병상 자리를 만든다
+    // ④ 최소 크기에서도 모자라면 그때 배치된 대수로 확정한다 (장비 수량 감축)
     if (totalBeds < target && shrink > 0.61 && !opts._noShrink) {
-      const deeper = autoModel({ ...opts, _shrink: Math.round((shrink - 0.1) * 10) / 10 });
+      // ③ 실 축소 — 더 줄여도 병상이 늘지 않으면 실이 더 큰 구성으로 되돌린다
+      const deeper = autoModel({ ...opts, _variant: vbits, _shrink: Math.round((shrink - 0.1) * 10) / 10 });
       if (deeper.placed > totalBeds) return deeper;
-      return autoModel({ ...opts, _shrink: shrink, _noShrink: true });
+      return autoModel({ ...opts, _variant: vbits, _shrink: shrink, _noShrink: true });
+    }
+    // ② 목표를 채웠으면 남는 공간을 실에 돌려준다 (병상이 줄면 되돌림)
+    if (!inflate && !opts._final && totalBeds >= target) {
+      const grown = autoModel({ ...opts, _variant: vbits, _inflate: true, _final: true });
+      if (grown.placed >= target) return grown;
+      return autoModel({ ...opts, _variant: vbits, _final: true });
     }
     return {
       placed: totalBeds, // 잠긴 병상 포함 전체
       target,
       variant: {
         techSide, aisle, mainCorridor: mainCw, moduleWidth: MW, consoleDepth: CD,
-        shrink, // 병상 우선 배치로 적용된 실 크기 축소 배율 (1 = 축소 없음)
+        variant: vbits, // 적용된 골격 조합 (0~15)
+        shrink,   // ③단계에서 적용된 실 크기 축소 배율 (1 = 축소 없음)
+        inflate,  // ②단계 적용 여부 (목표 달성 후 남는 공간을 실에 환원)
+        // 적용된 배치 단계: bed(장비 우선) | grown(여유 환원) | shrunk(실 축소) | capped(대수 감축)
+        stage: totalBeds < target ? "capped" : (inflate ? "grown" : (shrink < 1 ? "shrunk" : "bed")),
         // 부속시설(실) 면적 : 전체 면적 비율 — 조건 ③ 1:1 목표
         facilityRatio: Math.round((baseArea * kScale * kScale) / (W * H) * 100) / 100,
       },
