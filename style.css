@@ -106,7 +106,8 @@ html, body {
 
 /* ── 좌측 에셋 툴바 ── */
 #asset-toolbar {
-  width: 220px;
+  /* 시설별 크기(가로×세로) 입력과 실 이름이 잘리지 않도록 폭을 넓게 잡는다 */
+  width: 340px;
   flex-shrink: 0;
   background: #fff;
   border-right: 1px solid #cfd8dc;
@@ -158,7 +159,9 @@ html, body {
 .tb-body .asset-btn:last-child, .tb-body .tool-btn:last-child { margin-bottom: 0; }
 
 /* Auto Modeling 패널 */
-#auto-model-panel .prop-row input { width: 90px; }
+#auto-model-panel .prop-row input, #auto-model-panel .prop-row select { width: 120px; }
+#auto-model-panel .prop-row { gap: 10px; }
+#capacity-est { font-weight: 700; color: #00695c; }
 .fac-check {
   display: flex;
   align-items: center;
@@ -169,10 +172,11 @@ html, body {
   cursor: pointer;
 }
 .fac-check input { accent-color: #00897b; }
-/* 시설별 크기(mm) 입력 — 값을 바꾸면 해당 실은 지정 크기로 배치된다 */
-.fac-check .fac-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 시설별 크기(mm) 입력 — 값을 바꾸면 해당 실은 지정 크기로 배치된다.
+   실 이름은 줄이지 않고 전체가 보이도록 폭을 확보한다 */
+.fac-check .fac-name { flex: 1; min-width: 128px; white-space: nowrap; }
 .fac-check input[type="number"] {
-  width: 48px;
+  width: 62px;
   padding: 1px 2px;
   font-size: 11px;
   border: 1px solid #cfd8dc;

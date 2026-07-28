@@ -74,7 +74,7 @@
         label.className = "fac-check";
         label.innerHTML = `<input type="checkbox" data-key="${k}" checked
           ${k === "water_treatment" ? "disabled" : ""} />
-          <span class="fac-name" title="${s.label}">${s.label}${k === "water_treatment" ? " (필수)" : ""}</span>
+          <span class="fac-name" title="${s.label}">${s.label.replace(/\s*\([A-Za-z][^)]*\)/, "")}${k === "water_treatment" ? " (필수)" : ""}</span>
           <input type="number" data-size-w="${k}" value="${s.width * 10}" min="1000" step="100" title="${s.label} 가로(mm) — 바꾸면 지정 크기로 배치" />
           <span class="fac-x">×</span>
           <input type="number" data-size-h="${k}" value="${s.height * 10}" min="1000" step="100" title="${s.label} 세로(mm) — 바꾸면 지정 크기로 배치" />`;
@@ -464,6 +464,19 @@
       FloorCanvas.redo() || toast("다시 실행할 작업이 없습니다."));
     on("btn-duplicate", "click", () =>
       FloorCanvas.duplicateSelection() || toast("복제할 객체를 먼저 선택하세요."));
+    // 회전: 90°(시계/반시계) · 15° 미세 · 0° 초기화. 잠긴 객체는 회전하지 않는다
+    const rotate = (deg, mode) => {
+      if (FloorCanvas.rotateSelection(deg, mode)) {
+        const o = FloorCanvas.getCanvas().getActiveObject();
+        if (o && $("prop-angle")) $("prop-angle").value = Math.round(o.angle);
+      } else {
+        toast("회전할 객체를 먼저 선택하세요. (잠긴 객체는 잠금 해제 후 회전)");
+      }
+    };
+    on("btn-rot-cw", "click", () => rotate(90));
+    on("btn-rot-ccw", "click", () => rotate(-90));
+    on("btn-rot-15", "click", () => rotate(15));
+    on("btn-rot-reset", "click", () => rotate(0, "abs"));
     on("btn-flip-h", "click", () =>
       FloorCanvas.flipSelection("h") || toast("반전할 객체를 먼저 선택하세요."));
     on("btn-flip-v", "click", () =>
@@ -505,6 +518,8 @@
       if (ctrl && e.key.toLowerCase() === "c") { e.preventDefault(); FloorCanvas.copySelection(); return; }
       if (ctrl && e.key.toLowerCase() === "v") { e.preventDefault(); FloorCanvas.pasteClipboard(); return; }
       if (ctrl && e.key.toLowerCase() === "d") { e.preventDefault(); FloorCanvas.duplicateSelection(); return; }
+      // R: 시계 90° 회전 / Shift+R: 반시계 90°
+      if (!ctrl && e.key.toLowerCase() === "r") { e.preventDefault(); rotate(e.shiftKey ? -90 : 90); return; }
       if (e.key === "Delete" || e.key === "Backspace") FloorCanvas.deleteSelection();
       if (e.key === "Escape") {
         FloorCanvas.finishPipe();
