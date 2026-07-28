@@ -162,17 +162,6 @@ html, body {
 #auto-model-panel .prop-row input, #auto-model-panel .prop-row select { width: 120px; }
 #auto-model-panel .prop-row { gap: 10px; }
 #capacity-est { font-weight: 700; color: #00695c; }
-/* 「목록 크기 고정」 — prop-row의 입력 폭 규칙(120px)에서 제외 */
-#auto-model-panel .prop-row .inline-check {
-  width: 120px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: #37474f;
-  cursor: pointer;
-}
-#auto-model-panel .prop-row .inline-check input { width: auto; margin: 0; }
 .fac-check {
   display: flex;
   align-items: center;

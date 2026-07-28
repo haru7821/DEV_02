@@ -71,21 +71,14 @@
     Object.entries(equipmentData)
       .filter(([k, s]) => s.type === "room" || s.type === "infrastructure")
       .forEach(([k, s]) => {
-        // N.S는 「스테이션 좌석」 수에서 카운터·데스크 치수가 산출되므로 크기 입력 불가
-        const derived = k === "nurse_station";
-        const sizeTip = derived
-          ? "스테이션 좌석 수에서 자동 산출됩니다 (직접 입력 불가)"
-          : "— 자동 배치에 이 치수를 그대로 적용합니다";
         const label = document.createElement("label");
         label.className = "fac-check";
         label.innerHTML = `<input type="checkbox" data-key="${k}" checked
           ${k === "water_treatment" ? "disabled" : ""} />
           <span class="fac-name" title="${s.label}">${s.label.replace(/\s*\([A-Za-z][^)]*\)/, "")}${k === "water_treatment" ? " (필수)" : ""}</span>
-          <input type="number" ${derived ? "" : `data-size-w="${k}"`} value="${s.width * 10}" min="1000" step="100"
-            ${derived ? "disabled" : ""} title="${s.label} 가로(mm) ${sizeTip}" />
+          <input type="number" data-size-w="${k}" value="${s.width * 10}" min="1000" step="100" title="${s.label} 가로(mm) — 바꾸면 지정 크기로 배치" />
           <span class="fac-x">×</span>
-          <input type="number" ${derived ? "" : `data-size-h="${k}"`} value="${s.height * 10}" min="1000" step="100"
-            ${derived ? "disabled" : ""} title="${s.label} 세로(mm) ${sizeTip}" />`;
+          <input type="number" data-size-h="${k}" value="${s.height * 10}" min="1000" step="100" title="${s.label} 세로(mm) — 바꾸면 지정 크기로 배치" />`;
         // 크기 입력 클릭이 체크박스를 토글하지 않도록 한다
         label.querySelectorAll("input[type=number]").forEach((el) =>
           el.addEventListener("click", (e) => e.preventDefault()));
@@ -93,17 +86,16 @@
       });
   }
 
-  /** 시설별 크기 입력 수집(cm) — 목록에 적힌 값이 곧 '고정 크기'다.
-   *  기본값이든 직접 입력한 값이든, 자동 배치는 여기 적힌 치수를 그대로 쓴다
-   *  (병상 대수 연동 확대·여유 공간 흡수 없음). 목표 병상이 안 들어갈 때만
-   *  배치 우선순위 사다리 ③단계가 전체를 같은 비율로 축소한다. */
+  /** 시설별 크기 입력 수집(cm) — 기본값에서 바꾼 실만 '지정 크기'로 취급 */
   function collectRoomSizes() {
     const sizes = {};
     document.querySelectorAll("#facility-checks input[data-size-w]").forEach((el) => {
       const k = el.dataset.sizeW;
       const hEl = document.querySelector(`#facility-checks input[data-size-h="${k}"]`);
-      const w = toCM(+el.value), h = toCM(hEl ? +hEl.value : 0);
-      if (w > 0 && h > 0) sizes[k] = { w, h };
+      const w = toCM(+el.value), h = toCM(+hEl.value);
+      if (w > 0 && h > 0 && (w !== equipmentData[k].width || h !== equipmentData[k].height)) {
+        sizes[k] = { w, h };
+      }
     });
     return sizes;
   }
@@ -312,8 +304,7 @@
     document.querySelectorAll("#facility-checks input[data-key]").forEach((el) => {
       facilities[el.dataset.key] = el.checked;
     });
-    const flags = { fixRoomSize: !!($("fix-room-size") || {}).checked };
-    return { fields, rooms, facilities, flags };
+    return { fields, rooms, facilities };
   }
 
   function applySettings(st) {
@@ -329,9 +320,6 @@
       const el = document.querySelector(`#facility-checks input[data-key="${k}"]`);
       if (el && !el.disabled) el.checked = on;
     });
-    if (st.flags && $("fix-room-size") && "fixRoomSize" in st.flags) {
-      $("fix-room-size").checked = !!st.flags.fixRoomSize;
-    }
     if ($("snap-size")) FloorCanvas.setSnap(+$("snap-size").value);
   }
 
@@ -519,8 +507,7 @@
       const r = FloorCanvas.autoModel({
         targetBeds: +$("target-beds").value,
         facilities,
-        roomSizes: collectRoomSizes(),                 // 시설 목록에 적힌 실별 크기(cm)
-        fixRoomSize: $("fix-room-size").checked,       // 목록 크기 고정 (축소·확대 단계 생략)
+        roomSizes: collectRoomSizes(),                 // 실별 지정 크기(cm) — 기본값에서 바꾼 실만
         passage: toCM(+$("passage-width").value),      // 보조통로: 마주보는 병상 사이
         mainCorridor: toCM(+$("main-corridor").value), // 주통로: 출입구→필드 끝 주 동선
         seed: (Date.now() ^ Math.floor(Math.random() * 1e9)) >>> 0, // 누를 때마다 다른 시드
@@ -529,20 +516,12 @@
       // 적용된 배치 단계를 그대로 안내한다
       // ① 장비 우선 → ② 여유 환원 → ③ 실 축소 → ④ 대수 감축
       const STAGE = {
-        bed: "실은 목록 크기 그대로, 병상을 우선 배치했습니다.",
+        bed: "실은 지정 크기 그대로, 병상을 우선 배치했습니다.",
         grown: "병상 목표를 채우고 남는 공간을 실 크기에 돌려줬습니다.",
         shrunk: `공간이 모자라 실 크기를 ${Math.round(r.variant.shrink * 100)}%로 줄여 병상 자리를 확보했습니다.`,
         capped: `실을 ${Math.round(r.variant.shrink * 100)}%까지 줄여도 자리가 모자라 병상 대수를 ${r.placed}대로 줄였습니다.`,
-        // 목록 크기 고정 — 실을 줄이지 않으므로 바로 대수 감축으로 간다
-        fixed: "실은 목록 크기 그대로 배치했습니다.",
-        "fixed-capped": `실을 목록 크기 그대로 두어 병상은 ${r.placed}대까지만 들어갑니다. `
-          + "「목록 크기 고정」을 끄면 실을 줄여 병상을 더 넣습니다.",
       };
-      let note = STAGE[r.variant.stage] ?? "";
-      // 기능상 최소 치수에 걸려 목록 크기를 못 쓴 실이 있으면 실제 치수를 알려준다
-      if (r.variant.sizeNotes && r.variant.sizeNotes.length) {
-        note += `\n최소 치수 적용: ${r.variant.sizeNotes.join(", ")}`;
-      }
+      const note = STAGE[r.variant.stage] ?? "";
       const spec = `서비스 존 ${r.variant.techSide === "left" ? "좌측" : "우측"}, 주통로 ${r.variant.mainCorridor * 10}mm · 보조통로 ${r.variant.aisle * 10}mm`;
       toast(r.placed >= r.target
         ? `Auto Modeling 완료: 병상 ${r.placed}대 (${spec})\n${note}\n버튼을 다시 누르면 다른 구성이 생성됩니다.`

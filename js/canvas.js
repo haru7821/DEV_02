@@ -1099,10 +1099,7 @@ const FloorCanvas = (() => {
     // ── 실 크기: 사용자 지정(roomSizes) 우선, 없으면 기본 스펙 ──
     // shrink: 병상 '대수 우선' 배치 — 목표 대수가 안 들어가면 실 크기를
     // 10%씩 단계 축소(최소 60%)해 병상 공간을 먼저 확보한다
-    // 「목록 크기 고정」: 시설 목록에 적힌 치수를 그대로 쓴다.
-    // 축소(③)·확대(②) 단계를 건너뛰므로 자리가 모자라면 곧바로 대수 감축(④)이다.
-    const fixRooms = !!opts.fixRoomSize;
-    const shrink = fixRooms ? 1 : (opts._shrink ?? 1);
+    const shrink = opts._shrink ?? 1;
     const userSize = (k) => (opts.roomSizes && opts.roomSizes[k]) || null;
     const q10 = (v) => Math.max(100, Math.round(v / 10) * 10);
 
@@ -1123,8 +1120,7 @@ const FloorCanvas = (() => {
      *  패널에서 직접 입력한 실은 '제공된 크기 그대로' 쓰고 대수 연동을 적용하지 않는다. */
     const bDim = (k, dim) => {
       const u = userSize(k);
-      // 목록 크기 고정이면 10cm 단위로 반올림하지 않고 적힌 값을 그대로 쓴다
-      if (u) return fixRooms ? Math.max(100, Math.round(u[dim])) : q10(u[dim] * shrink);
+      if (u) return q10(u[dim] * shrink);
       return q10(equipmentData[k][dim === "w" ? "width" : "height"] * bedScale(k) * shrink);
     };
     const bW = (k) => bDim(k, "w");
@@ -1192,7 +1188,7 @@ const FloorCanvas = (() => {
     // ── 배치 우선순위 ①: 장비(병상) 수량 우선 ──
     // 기본은 실을 부풀리지 않고 '제공된/기본 크기 그대로' 두어 병상 공간을 먼저 확보한다.
     // 목표 대수를 채운 뒤에만(_inflate) 남는 공간을 실에 돌려준다.
-    const inflate = !fixRooms && !!opts._inflate;
+    const inflate = !!opts._inflate;
     let kScale = 1;
     if (inflate && baseArea > 0) {
       kScale = Math.sqrt((W * H * 0.5) / baseArea);
@@ -1339,7 +1335,6 @@ const FloorCanvas = (() => {
        * opts.width : 문 폭(cm) 재정의 — 예) 정수실 장비 반입용 1000mm
        * opts.outward : true면 바깥여닫이 — 정수실처럼 실 안쪽에 문짝을
        *   젖힐 공간이 없는 실에 쓴다 (roomSide를 반대로 줘서 문짝을 밖으로 그린다)
-       * opts.w : 실 폭(cm) — 고정 크기 실이 열 폭보다 좁을 때 실제 폭을 넘긴다
        * 반환값은 문 앞 금지 구역(오브젝트 배치 회피용)
        *
        * 문 앵커 보정: angle 90은 앵커 기준 왼쪽·아래로, 270은 오른쪽·위로
@@ -1350,10 +1345,7 @@ const FloorCanvas = (() => {
         const my = ty + Math.round(h / 2);                  // 벽면 세로 중앙
         const innerIsRight = techSide === "left";           // 복도 쪽이 오른쪽 변인가
         const onRight = opts.outer ? !innerIsRight : innerIsRight;
-        const rw = opts.w ?? colW;
-        // 실이 열 폭보다 좁으면 외벽 쪽에 붙여 놓는다 → 복도 쪽 변도 그만큼 안쪽
-        const rx = innerIsRight ? colX(c) : colX(c) + colW - rw;
-        const edge = onRight ? rx + rw : rx;
+        const edge = onRight ? colX(c) + colW : colX(c);
         // 실 기준: 오른쪽 벽이면 roomSide "right"(실이 왼쪽) → 안쪽으로 열림
         // outward면 반대 변을 실로 간주해 문짝이 실 밖으로 젖혀지게 한다
         const swingRight = opts.outward ? !onRight : onRight;
@@ -1370,15 +1362,12 @@ const FloorCanvas = (() => {
       let wtTop = H - patientBandH - M;
       if (hasWT && !lockedHas("water_treatment")) {
         const wtH = sH("water_treatment");
-        // 고정 크기 실이 열 폭보다 좁으면 외벽 쪽에 붙인다
-        const wtW = Math.min(colW, userSize("water_treatment") ? bW("water_treatment") : colW);
-        const wtX = techSide === "left" ? colX(0) : colX(0) + colW - wtW;
         wtTop = H - patientBandH - M - wtH;
-        addEquipment("water_treatment", { left: wtX, top: wtTop, width: wtW, height: wtH, silent: true });
+        addEquipment("water_treatment", { left: colX(0), top: wtTop, width: colW, height: wtH, silent: true });
         // 정수실 문: 탱크·RO 반입을 위해 1000mm 폭, 벽면 중앙.
         // RO 유닛·염수탱크가 벽면을 채워 문짝을 안으로 젖힐 수 없다 → 바깥여닫이
-        const wtZone = wallDoor("swing_door", 0, wtTop, wtH, { width: 100, outward: true, w: wtW });
-        populateRoom("water_treatment", wtX, wtTop, wtW, wtH, [wtZone]);
+        const wtZone = wallDoor("swing_door", 0, wtTop, wtH, { width: 100, outward: true });
+        populateRoom("water_treatment", colX(0), wtTop, colW, wtH, [wtZone]);
       }
       // 나머지 후방 실은 정수실 위에서부터 아래→위로 적층하고,
       // 열이 차면 안쪽 열(col 1)로 넘어간다 — 두 열 사이는 내부 복도.
@@ -1422,48 +1411,40 @@ const FloorCanvas = (() => {
       if (reserveWaste) {
         colRooms[0].push({ key: "waste_room", h: wasteH, fixed: !!userSize("waste_room") });
       }
-      // ② 각 열의 남는 높이를 자동 실에만 배분해 틈을 메운다.
-      //    목록에서 크기를 받은 실(fixed)은 '고정 크기'이므로 늘리지 않는다 —
-      //    모두 고정이면 남는 높이는 그대로 여백으로 둔다.
+      // ② 각 열의 남는 높이를 실들에 배분해 '정확히' 채운다 — 틈·빈 공간 0.
+      //    사용자가 크기를 지정한 실(fixed)은 그대로 두고 자동 실에만 배분하되,
+      //    모든 실이 지정 크기라면 틈 방지가 우선이므로 전체에 배분한다.
       colRooms.forEach((list, c) => {
         if (!list.length) return;
-        const pool = list.filter((r) => !r.fixed);
-        if (pool.length) {
-          const extra = colAvail[c] - list.reduce((s, r) => s + r.h, 0);
-          const per = Math.floor(extra / pool.length / 10) * 10;
-          pool.forEach((r) => { r.h += per; });
-          pool[pool.length - 1].h += colAvail[c] - list.reduce((s, r) => s + r.h, 0);
-        }
-        // ③ 아래에서 위로 벽을 공유하며 배치.
-        //    고정 크기 실이 열 폭보다 좁으면 외벽 쪽에 붙인다 (복도 폭이 넓어짐)
-        const innerIsRight = techSide === "left";
+        const flex = list.filter((r) => !r.fixed);
+        const pool = flex.length ? flex : list;
+        const extra = colAvail[c] - list.reduce((s, r) => s + r.h, 0);
+        const per = Math.floor(extra / pool.length / 10) * 10;
+        pool.forEach((r) => { r.h += per; });
+        pool[pool.length - 1].h += colAvail[c] - list.reduce((s, r) => s + r.h, 0); // 잔여 흡수
+        // ③ 아래에서 위로 벽을 공유하며 배치
         let ty = c === 0 ? wtTop : H - patientBandH - M;
-        list.forEach(({ key, h }, li) => {
+        list.forEach(({ key, h }) => {
           ty -= h;
-          // 오물처리실은 상단 외벽에 반드시 붙인다 — 반출입(서비스) 문 조건.
-          // 목록 크기 고정이면 열이 꽉 차지 않아 그냥 쌓으면 위가 뜬다.
-          if (key === "waste_room" && li === list.length - 1) ty = M;
-          const rw = Math.min(colW, userSize(key) ? bW(key) : colW);
-          const rx = innerIsRight ? colX(c) : colX(c) + colW - rw;
-          if (lockedHas(key) || hitLocked(rx, ty, rw, h)) { ty += h; return; } // 잠금 보존/회피
-          addEquipment(key, { left: rx, top: ty, width: rw, height: h, silent: true });
+          if (lockedHas(key) || hitLocked(colX(c), ty, colW, h)) { ty += h; return; } // 잠금 보존/회피
+          addEquipment(key, { left: colX(c), top: ty, width: colW, height: h, silent: true });
           const zones = [];
           if (key === "waste_room") {
             // 오물처리실: 미닫이문(벽면 중앙), 내부 복도 + 외벽 양방향 출구
-            zones.push(wallDoor("sliding_door", c, ty, h, { w: rw }));
-            if (c === 0) zones.push(wallDoor("sliding_door", c, ty, h, { outer: true, w: rw }));
+            zones.push(wallDoor("sliding_door", c, ty, h));
+            if (c === 0) zones.push(wallDoor("sliding_door", c, ty, h, { outer: true }));
             // 상단 외벽에 접하면 반출입(서비스) 전용 문을 추가로 낸다 —
             // 오물 반출·물품 입고가 실내를 거치지 않고 외부로 바로 연결된다
             if (ty <= M + 15) {
-              const sx = rx + Math.round(rw / 2);
+              const sx = colX(c) + Math.round(colW / 2);
               addDoor("sliding_door", { anchor: { x: sx, y: ty }, roomSide: "top", silent: true });
               zones.push({ x0: sx - 80, x1: sx + 80, y0: ty - 5, y1: ty + 110 });
               serviceDoor = { x: sx, y: ty };
             }
           } else {
-            zones.push(wallDoor("swing_door", c, ty, h, { w: rw }));
+            zones.push(wallDoor("swing_door", c, ty, h));
           }
-          populateRoom(key, rx, ty, rw, h, zones);
+          populateRoom(key, colX(c), ty, colW, h, zones);
         });
       });
       // 두 열 사이 내부 복도 표시 (후방 지원 동선)
@@ -1547,38 +1528,34 @@ const FloorCanvas = (() => {
       // 실 사이 틈(사람이 지나갈 수 없는 슬리버)과 빈 공간을 없앤다
       const baseW = fitKeys.reduce((s, key) => s + sW(key), 0);
       const slack = Math.max(0, usableW - baseW);
-      // 남는 폭은 크기를 지정하지 않은 실에만 배분한다.
-      // 목록에서 크기를 받은 실은 '고정 크기'이므로 늘리지 않는다 —
-      // 모두 고정이면 남는 폭은 그대로 여백으로 둔다.
-      const growPool = fitKeys.filter((k) => !userSize(k));
+      // 남는 폭은 크기를 지정하지 않은 실에만 배분한다 (모두 지정이면 전체 배분)
+      const growKeys = fitKeys.filter((k) => !userSize(k));
+      const growPool = growKeys.length ? growKeys : fitKeys;
       const grow = growPool.length ? Math.floor(slack / growPool.length / 10) * 10 : 0;
 
       let px = bandX0;
       fitKeys.forEach((key, i) => {
         if (lockedHas(key)) return; // 잠긴 동일 실이 있으면 새로 만들지 않는다
-        // 마지막 자동 실은 남은 폭을 모두 흡수해 밴드 끝까지 붙인다 (틈 방지 우선)
-        const flexible = growPool.includes(key);
-        let w = (flexible && i === fitKeys.length - 1)
+        // 마지막 실은 남은 폭을 모두 흡수해 밴드 끝까지 붙인다 (틈 방지 우선)
+        let w = i === fitKeys.length - 1
           ? Math.max(sW(key), xMax - px)
-          : sW(key) + (flexible ? grow : 0);
-        // 고정 크기 실은 자기 깊이대로, 하단 외벽에 붙여 놓는다
-        const rh = userSize(key) ? Math.min(patientBandH, bH(key)) : patientBandH;
-        const roomTop = H - M - rh;
+          : sW(key) + (growPool.includes(key) ? grow : 0);
+        const roomTop = H - patientBandH - M;
         // 주 동선 구간에 걸치면 통째로 건너뛴다 (출입구 앞을 막지 않는다)
         if (px < gapX1 && px + w > gapX0) {
           if (px < gapX0 && gapX0 - px >= 150) w = gapX0 - px;   // 앞쪽에 실이 들어갈 만하면 잘라 쓰고
           else px = gapX1;                                        // 아니면 통로 너머로 넘어간다
-          if (flexible && i === fitKeys.length - 1) w = Math.max(sW(key), xMax - px);
+          if (i === fitKeys.length - 1) w = Math.max(sW(key), xMax - px);
         }
-        const hz = hitLocked(px, roomTop, w, rh);
+        const hz = hitLocked(px, roomTop, w, patientBandH);
         if (hz) px = Math.round((hz.x1 + 5) / 10) * 10; // 잠금 구역 뒤로 밀어 배치
         if (px + w > xMax + 1) return;
-        addEquipment(key, { left: px, top: roomTop, width: w, height: rh, silent: true });
+        addEquipment(key, { left: px, top: roomTop, width: w, height: patientBandH, silent: true });
         const zones = [];
         if (key === "waiting_area") {
           // 대기실은 주 출입구와 직접 연결 — 주 동선 쪽 벽에 양짝문
           const dl = doorData.double_swing_door.width;
-          const my = roomTop + Math.round(rh / 2);
+          const my = roomTop + Math.round(patientBandH / 2);
           const onRight = corridorAtRight; // 주 동선 쪽 벽에 단다
           const edge = onRight ? px + w : px;
           addDoor("double_swing_door", {
@@ -1593,7 +1570,7 @@ const FloorCanvas = (() => {
           addDoor("swing_door", { anchor: { x: mx, y: roomTop }, roomSide: "top", silent: true });
           zones.push({ x0: mx - 60, x1: mx + 60, y0: roomTop - 5, y1: roomTop + 110 });
         }
-        populateRoom(key, px, roomTop, w, rh, zones);
+        populateRoom(key, px, roomTop, w, patientBandH, zones);
         px += w; // 실끼리 벽을 공유 — 사이에 빈 틈을 만들지 않는다
       });
     }
@@ -1707,20 +1684,18 @@ const FloorCanvas = (() => {
           : Math.min(w, Math.floor(avail / 10) * 10);
         if (ww < 120) return;                       // 1,200mm 미만이면 이 구성에선 생략
         const rx = growLeft ? edge - ww : edge;
-        // 「목록 크기 고정」이면 스트립 줄 높이가 아니라 목록 깊이를 쓴다
-        const rh = fixRooms ? Math.min(rowH, bH(key)) : rowH;
-        if (hitLocked(rx, stripTop, ww, rh)) return;
+        if (hitLocked(rx, stripTop, ww, rowH)) return;
         w = ww;
-        addEquipment(key, { left: rx, top: stripTop, width: w, height: rh, silent: true });
+        addEquipment(key, { left: rx, top: stripTop, width: w, height: rowH, silent: true });
         // 문은 병상 필드 쪽 벽 중앙 — 스테이션과 바로 통한다
         // (상단 스트립이면 아래쪽 변, 중앙 아일랜드면 위쪽 변이 필드 쪽)
         const dx = rx + Math.round(w / 2);
-        const dy = useIsland ? stripTop : stripTop + rh;
+        const dy = useIsland ? stripTop : stripTop + rowH;
         addDoor("swing_door", { anchor: { x: dx, y: dy },
           roomSide: useIsland ? "top" : "bottom", silent: true });
-        populateRoom(key, rx, stripTop, w, rh, [useIsland
+        populateRoom(key, rx, stripTop, w, rowH, [useIsland
           ? { x0: dx - 70, x1: dx + 70, y0: stripTop - 5, y1: stripTop + 110 }
-          : { x0: dx - 70, x1: dx + 70, y0: stripTop + rh - 110, y1: stripTop + rh + 5 }]);
+          : { x0: dx - 70, x1: dx + 70, y0: stripTop + rowH - 110, y1: stripTop + rowH + 5 }]);
         stripZones.push({ key, left: rx, right: rx + w, top: stripTop, bottom: stripTop + rowH });
         stripBottom = Math.max(stripBottom, stripTop + rowH);
         edge = growLeft ? rx : rx + w; // 다음 실은 이 실의 바깥쪽에 붙는다
@@ -2158,36 +2133,19 @@ const FloorCanvas = (() => {
     canvas.requestRenderAll();
     endBulk();
     const totalBeds = getObjects().filter((o) => o.meta.key === "bed_unit").length;
-    // 「목록 크기 고정」인데 목록 치수를 그대로 못 쓴 실을 모은다 —
-    // 격리실(병상 모듈이 들어갈 최소 깊이)·N.S(좌석 수에서 산출) 등 기능상 하한이 있는 실.
-    // 사각형은 테두리 3cm만큼 크게 그려지므로 빼고 비교한다.
-    const sizeNotes = [];
-    if (fixRooms && opts.roomSizes) {
-      getObjects().filter((o) => ["room", "infrastructure"].includes(o.meta.type))
-        .forEach((o) => {
-          const u = opts.roomSizes[o.meta.key];
-          if (!u) return;
-          const rw = Math.round(o.getScaledWidth()) - 3, rh = Math.round(o.getScaledHeight()) - 3;
-          if (Math.abs(rw - u.w) > 2 || Math.abs(rh - u.h) > 2) {
-            sizeNotes.push(`${equipmentData[o.meta.key].label} ${rw * 10}×${rh * 10}`);
-          }
-        });
-    }
     // ───────── 배치 우선순위 사다리 ─────────
     // ① 장비(병상) 수량 우선 — 실은 제공된 크기 그대로, 병상을 최대로 채운다
     // ② 목표를 채웠고 공간이 남으면 그 여유를 실 크기에 돌려준다 (_inflate)
     // ③ 공간이 모자라면 실 크기를 10%씩(최소 60%) 줄여 병상 자리를 만든다
     // ④ 최소 크기에서도 모자라면 그때 배치된 대수로 확정한다 (장비 수량 감축)
-    // 「목록 크기 고정」이면 ②③을 건너뛴다 — 실은 목록 치수 그대로 두고,
-    // 자리가 모자라면 곧바로 ④(대수 감축)로 확정한다
-    if (!fixRooms && totalBeds < target && shrink > 0.61 && !opts._noShrink) {
+    if (totalBeds < target && shrink > 0.61 && !opts._noShrink) {
       // ③ 실 축소 — 더 줄여도 병상이 늘지 않으면 실이 더 큰 구성으로 되돌린다
       const deeper = autoModel({ ...opts, _variant: vbits, _shrink: Math.round((shrink - 0.1) * 10) / 10 });
       if (deeper.placed > totalBeds) return deeper;
       return autoModel({ ...opts, _variant: vbits, _shrink: shrink, _noShrink: true });
     }
     // ② 목표를 채웠으면 남는 공간을 실에 돌려준다 (병상이 줄면 되돌림)
-    if (!fixRooms && !inflate && !opts._final && totalBeds >= target) {
+    if (!inflate && !opts._final && totalBeds >= target) {
       const grown = autoModel({ ...opts, _variant: vbits, _inflate: true, _final: true });
       if (grown.placed >= target) return grown;
       return autoModel({ ...opts, _variant: vbits, _final: true });
@@ -2200,13 +2158,8 @@ const FloorCanvas = (() => {
         variant: vbits, // 적용된 골격 조합 (0~15)
         shrink,   // ③단계에서 적용된 실 크기 축소 배율 (1 = 축소 없음)
         inflate,  // ②단계 적용 여부 (목표 달성 후 남는 공간을 실에 환원)
-        fixRooms, // 목록 크기 고정 여부
-        sizeNotes, // 목록 치수를 그대로 못 쓴 실 (기능상 최소 치수에 걸린 경우)
         // 적용된 배치 단계: bed(장비 우선) | grown(여유 환원) | shrunk(실 축소) | capped(대수 감축)
-        // 목록 크기 고정이면 fixed / fixed-capped
-        stage: fixRooms
-          ? (totalBeds < target ? "fixed-capped" : "fixed")
-          : (totalBeds < target ? "capped" : (inflate ? "grown" : (shrink < 1 ? "shrunk" : "bed"))),
+        stage: totalBeds < target ? "capped" : (inflate ? "grown" : (shrink < 1 ? "shrunk" : "bed")),
         // 부속시설(실) 면적 : 전체 면적 비율 — 조건 ③ 1:1 목표
         facilityRatio: Math.round((baseArea * kScale * kScale) / (W * H) * 100) / 100,
       },
