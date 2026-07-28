@@ -436,5 +436,6 @@ const MEDICAL_RULES = {
   MIN_AISLE_CM: 116,        // 통로 최소 (27bed 최소 실측 1,160)
   MAIN_CORRIDOR_CM: 200,    // 주통로 기본 2,000 (참고: 25BED 중앙 로비 실측 3,370)
   NS_DESK_PITCH_CM: 118,    // N.S 2인 데스크 1조 피치 (25BED 5,878 ÷ 5조)
-  NS_DEPTH_CM: 150,         // N.S 카운터 블록 깊이 (25BED 3,502은 전면 작업공간 포함)
+  NS_DEPTH_CM: 150,         // N.S 카운터 블록 최소 깊이 (25BED 3,502는 전면 작업공간 포함)
+  NS_ENTRY_CM: 80,          // N.S 간호사 출입·통행 폭 (800mm)
 };

@@ -958,35 +958,54 @@ const FloorCanvas = (() => {
    * 참고 도면의 간호 스테이션: 병상 필드 안에 독립 배치된 U자 카운터로,
    * 개방면이 병상 쪽을 향해 모든 병상 열을 관찰한다. 내부에 2인 데스크
    * 유닛(stationSeats/2 조)을 배치한다. */
-  function addStationIsland(x, y, seats) {
-    // 데스크는 1열로 나란히 놓여 모두 병상(개방면)을 바라본다.
+  function addStationIsland(x, y, seats, entrySide = "left") {
+    // 데스크는 1열로 나란히 놓여 모두 병상(개방면=아래)을 바라본다.
     // 25BED 도면의 N.S 카운터 실측 5,878mm에 2인 데스크 5조 → 1조당 피치 1,180mm.
     const desks = Math.min(4, Math.ceil((seats ?? stationSeats) / 2));
     const pitch = MEDICAL_RULES.NS_DESK_PITCH_CM;
-    const bar = 40;         // 후면 카운터(수납) 깊이
-    const w = 60 + desks * pitch;
-    const h = MEDICAL_RULES.NS_DEPTH_CM; // 카운터 블록 깊이 (25BED 3,502는 전면 작업공간 포함)
+    const bar = 40;                                  // 후면 카운터(수납) 깊이
+    const entry = MEDICAL_RULES.NS_ENTRY_CM;         // 간호사 출입·통행 폭 (800mm)
+    const deskH = equipmentData.station_desk2.height; // 데스크 유닛 깊이
+    const innerW = desks * pitch;                    // 데스크 1열이 차지하는 폭
+    const w = bar * 2 + innerW + 10;
+    // 깊이 = 후면 카운터 + 간호사 통행(800mm) + 데스크. 통행 폭이 항상 확보된다.
+    const h = Math.max(MEDICAL_RULES.NS_DEPTH_CM, bar + entry + deskH);
     const col = "#FF9800";
     const mk = (left, top, bw, bh) => new fabric.Rect({
       left, top, width: bw, height: bh, rx: 12, ry: 12,
       fill: col + "55", stroke: col, strokeWidth: 3,
     });
+    // 출입 개구부: 한쪽 팔의 통행 구간(후면 카운터 바로 아래 800mm)을 비운다
+    const openTop = bar, openBot = bar + entry;
+    const arm = (left, opened) => (opened
+      ? [mk(left, 0, bar, openTop), mk(left, openBot, bar, h - openBot)]
+      : [mk(left, 0, bar, h)]);
     const parts = [
-      mk(0, 0, w, bar),          // 상부 바 (닫힌 면)
-      mk(0, 0, bar, h),          // 좌측 팔
-      mk(w - bar, 0, bar, h),    // 우측 팔 — 아래(병상 필드)가 개방면
+      mk(0, 0, w, bar),                                   // 상부 바 (닫힌 면)
+      ...arm(0, entrySide === "left"),                    // 좌측 팔
+      ...arm(w - bar, entrySide === "right"),             // 우측 팔
       new fabric.Text("N.S", {
         fontSize: 30, fontWeight: "bold", fill: "#E65100",
         left: w / 2, top: 4, originX: "center",
+      }),
+      // 출입구 표기 (개구부 중앙)
+      new fabric.Text(`출입 ${entry * 10}`, {
+        fontSize: 16, fill: "#E65100",
+        left: entrySide === "left" ? bar / 2 : w - bar / 2,
+        top: openTop + entry / 2, originX: "center", originY: "center",
+        angle: 90,
       }),
     ];
     const grp = new fabric.Group(parts, { left: x, top: y });
     grp.meta = { key: "nurse_station", label: "간호 스테이션 (N.S)", type: "room" };
     canvas.add(grp);
     applyBlueprintToObject(grp);
-    // 2인 데스크 유닛을 1열로 — 전원이 개방면(아래=병상)을 향해 착석
+    // 2인 데스크 유닛을 1열로 — 전원이 개방면(아래=병상)을 향해 착석하고,
+    // 데스크 뒤로 800mm 통행 공간이 남아 출입 개구부와 이어진다.
     for (let i = 0; i < desks; i++) {
-      addEquipment("station_desk2", { left: x + 42 + i * pitch, top: y + bar + 22, silent: true });
+      addEquipment("station_desk2", {
+        left: x + bar + 5 + i * pitch, top: y + h - deskH, silent: true,
+      });
     }
     return { grp, w, h };
   }
@@ -1166,7 +1185,8 @@ const FloorCanvas = (() => {
     // [N.S][간호처치실][조제실] 순으로 벽을 공유하며 이어 붙인다.
     // 간호사실(탈의·휴게)은 근무 공간이 아니므로 후방 밴드에 떨어져 있어도 된다.
     // 상단 스트립(격리실 + N.S + 처치·조제)을 빼고도 병상 모듈 2개 폭이 남아야 한다.
-    const nsW0 = 60 + Math.min(4, Math.ceil(stationSeats / 2)) * MEDICAL_RULES.NS_DESK_PITCH_CM;
+    // N.S 아일랜드 폭 = 좌우 카운터 팔(40×2) + 데스크 1열 + 여유 (addStationIsland와 동일 식)
+    const nsW0 = 90 + Math.min(4, Math.ceil(stationSeats / 2)) * MEDICAL_RULES.NS_DESK_PITCH_CM;
     const isoW0 = hasIso ? Math.max(bW("isolation_room"), moduleWidth + 60) : 0;
     // 스트립에서 격리실·N.S를 뺀 나머지 폭. 처치실·조제실의 스테이션 인접이
     // 우선이므로 병상 자리를 미리 예약하지 않는다 — 스트립이 가득 차면
@@ -1449,7 +1469,7 @@ const FloorCanvas = (() => {
       nsZone = { left: r.left, right: r.left + r.width, top: r.top, bottom: r.top + r.height };
       stripBottom = Math.max(stripBottom, nsZone.bottom);
     } else if (hasNS) {
-      const nsW = 90 + Math.min(4, Math.ceil(stationSeats / 2)) * 172; // 1열 배치 폭
+      const nsW = nsW0; // 1열 배치 폭 (스트립 폭 계산과 동일 식)
       // 격리실 안쪽(주 동선 쪽)에 바로 붙인다
       // 격리실 벽에 밀착 — 사이에 사람이 못 지나는 좁은 틈(300mm)을 만들지 않는다
       let nsX = isoZone
@@ -1457,7 +1477,8 @@ const FloorCanvas = (() => {
         : (techSide === "left" ? corridor.x0 - nsW - 20 : corridor.x1 + 20);
       const nsY = M + 20;
       nsX = Math.max(fieldX0, Math.min(nsX, fieldX1 - nsW));
-      const ns = addStationIsland(nsX, nsY, stationSeats);
+      // 출입 개구부는 간호처치실 쪽 팔에 — 처치실↔스테이션 이동이 최단이 된다
+      const ns = addStationIsland(nsX, nsY, stationSeats, techSide === "left" ? "left" : "right");
       nsZone = { left: nsX, right: nsX + ns.w, top: nsY, bottom: nsY + ns.h };
       stripBottom = Math.max(stripBottom, nsZone.bottom);
       // 관찰 시야 표시: 개방면(아래)에서 병상 필드로 향하는 시야각
@@ -1523,20 +1544,24 @@ const FloorCanvas = (() => {
       return { rx0, rx1 };
     };
 
-    // 밴드 내 위/아래 행은 동일한 x 범위를 사용해 모듈이 세로로 정렬되게 한다
-    // (행이 어긋나면 콘솔 건너편 병상과 대각선 간격이 좁아진다)
+    // 모듈 격자: 모든 행이 같은 위상(fieldX0 + k·pitch)을 쓰므로, 행마다
+    // 배치 범위가 달라도 병상이 세로로 정확히 정렬된다 — 콘솔 건너편 병상과의
+    // 대각선 간격이 좁아지지 않으면서, 스트립 아래 남는 폭까지 채울 수 있다.
+    const gridX0 = fieldX0;
+    const snapGrid = (x) => gridX0 + Math.ceil((x - gridX0 - 0.5) / pitch) * pitch;
+
     const fillRow = (yBed, headDown, bounds) => {
-      let { rx0, rx1 } = bounds ?? boundsFor(yBed, yBed + MD);
+      const { rx0, rx1 } = bounds ?? boundsFor(yBed, yBed + MD);
       const row = [];
-      let x = rx0;
+      let x = snapGrid(rx0);
       while (x + MW <= rx1) { // 목표 대수와 무관하게 행을 끝까지 채운다
         if (corridor && x + MW > corridor.x0 && x < corridor.x1) {
-          x = Math.round((corridor.x1 + 10) / 10) * 10; // 주 동선 통로는 비운다
+          x = snapGrid(corridor.x1 + 10); // 주 동선 통로는 비운다 (격자 위상 유지)
           continue;
         }
         const lz = hitLocked(x, yBed, MW, MD);
         if (lz) { // 잠긴 객체 구역은 건너뛴다
-          x = Math.round((lz.x1 + 5) / 10) * 10;
+          x = snapGrid(lz.x1 + 5);
           continue;
         }
         const grp = addBedUnit(x, yBed, false, headDown);
@@ -1577,11 +1602,13 @@ const FloorCanvas = (() => {
     }
     // 빈 공간이 남지 않도록 필드가 허용하는 한 밴드를 계속 만든다 (최대 채움)
     while (by + MD + CD + MD <= fieldY1) {
-      // 양면 밴드: 위 행(머리 아래쪽) + 콘솔 + 아래 행(머리 위쪽)
-      const bandBounds = boundsFor(by, by + MD + CD + 6 + MD);
-      const above = fillRow(by, true, bandBounds);
+      // 양면 밴드: 위 행(머리 아래쪽) + 콘솔 + 아래 행(머리 위쪽).
+      // 범위는 행마다 따로 계산한다 — 상단 스트립보다 아래에 있는 행은 스트립에
+      // 막히지 않고 필드 전폭을 쓰므로 스트립 아래에 죽은 공간이 생기지 않는다.
+      const belowY = by + MD + CD + 6;
+      const above = fillRow(by, true, boundsFor(by, by + MD));
       const consoleY = by + MD + 3;
-      const below = fillRow(by + MD + CD + 6, false, bandBounds);
+      const below = fillRow(belowY, false, boundsFor(belowY, belowY + MD));
       if (above.length || below.length) {
         layConsole(consoleY, [...above, ...below]);
         bands.push({ consoleY, above, below });
