@@ -430,11 +430,11 @@ const MEDICAL_RULES = {
   BED_WALL_CLEARANCE_CM: 60,// 병상-벽 최소 여유 (자동 배치 시 참고)
   // ── 도면 실측 기본 치수 (cm) ──
   MODULE_PITCH_CM: 180,     // 병상 모듈 폭 = 침대+투석기 (27bed 1,800)
-  MODULE_DEPTH_CM: 220,     // 병상 모듈 길이 (침대 길이 기준)
+  MODULE_DEPTH_CM: 210,     // 병상 모듈 길이 (침대 길이 기준, 기본 2,100)
   CONSOLE_DEPTH_CM: 64,     // 배관 콘솔 두께 (27bed 640)
   SUB_AISLE_CM: 130,        // 보조통로 기본 — 도면 1,160~1,400의 중앙값
   MIN_AISLE_CM: 116,        // 통로 최소 (27bed 최소 실측 1,160)
-  MAIN_CORRIDOR_CM: 337,    // 주통로(중앙 로비) 기본 (25BED 3,370)
+  MAIN_CORRIDOR_CM: 200,    // 주통로 기본 2,000 (참고: 25BED 중앙 로비 실측 3,370)
   NS_DESK_PITCH_CM: 118,    // N.S 2인 데스크 1조 피치 (25BED 5,878 ÷ 5조)
   NS_DEPTH_CM: 150,         // N.S 카운터 블록 깊이 (25BED 3,502은 전면 작업공간 포함)
 };

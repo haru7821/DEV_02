@@ -1151,19 +1151,31 @@ const FloorCanvas = (() => {
       ? { x0: fieldX1 - mainCw, x1: fieldX1 }   // 기술 밴드 반대편 가장자리
       : { x0: fieldX0, x1: fieldX0 + mainCw };
 
-    // ── 간호처치실은 N.S에 붙인다 (업로드 도면 27bed 구성) ──
-    // 처치·투약 준비는 스테이션 업무의 연장이므로 N.S와 벽을 공유하고,
+    // ── 간호처치실·조제실은 N.S에 붙인다 (업로드 도면 27bed 구성) ──
+    // 처치·투약 준비는 스테이션 업무의 연장이므로 N.S에서 바깥쪽으로
+    // [N.S][간호처치실][조제실] 순으로 벽을 공유하며 이어 붙인다.
     // 간호사실(탈의·휴게)은 근무 공간이 아니므로 후방 밴드에 떨어져 있어도 된다.
-    // 상단 스트립(격리실 + N.S + 처치실)을 빼고도 병상 모듈 2개 폭이 남을 때만 적용.
+    // 상단 스트립(격리실 + N.S + 처치·조제)을 빼고도 병상 모듈 2개 폭이 남아야 한다.
     const nsW0 = 60 + Math.min(4, Math.ceil(stationSeats / 2)) * MEDICAL_RULES.NS_DESK_PITCH_CM;
     const isoW0 = hasIso ? Math.max(bW("isolation_room"), moduleWidth + 60) : 0;
-    // 스트립에서 격리실·N.S를 뺀 뒤 병상 모듈 2개 폭을 남기고 처치실에 줄 수 있는 폭
-    const treatAvailW = Math.floor(
-      ((fieldX1 - fieldX0) - (isoW0 ? isoW0 + 45 : 0) - (nsW0 + 45) - 45 - moduleWidth * 2) / 10) * 10;
-    const treatStripW = (hasNS && chosen.includes("treatment_room") &&
-      !lockedHas("nurse_station") && !lockedHas("treatment_room") && treatAvailW >= 200)
-      ? Math.min(bW("treatment_room"), treatAvailW) : 0; // 폭이 부족하면 좁혀서라도 붙인다
-    const treatInStrip = treatStripW > 0;
+    // 스트립에서 격리실·N.S를 뺀 나머지 폭. 처치실·조제실의 스테이션 인접이
+    // 우선이므로 병상 자리를 미리 예약하지 않는다 — 스트립이 가득 차면
+    // 병상 밴드는 스트립 아래 전폭에서 시작한다(bandsBelowStrip).
+    const stripAvailW = Math.floor(
+      ((fieldX1 - fieldX0) - (isoW0 ? isoW0 + 45 : 0) - (nsW0 + 45) - 45) / 10) * 10;
+    // N.S에 가까운 순서: 처치실 → 조제실. 폭이 모자라면 좁혀서라도 붙이고,
+    // 남은 폭이 최소치(2,000mm) 미만이면 그 실은 환자 밴드에 남긴다.
+    const stripPlan = [];
+    if (hasNS && !lockedHas("nurse_station")) {
+      let left = stripAvailW;
+      ["treatment_room", "pharmacy_room"].forEach((key) => {
+        if (!chosen.includes(key) || lockedHas(key) || left < 200) return;
+        const w = Math.min(bW(key), left);
+        stripPlan.push({ key, w });
+        left -= w;
+      });
+    }
+    const inStrip = (k) => stripPlan.some((r) => r.key === k);
     let serviceDoor = null; // 오물 반출·물품 입고용 외부 출입구 위치
     {
       const tx = techSide === "left" ? M : W - techBandW - M;
@@ -1332,8 +1344,8 @@ const FloorCanvas = (() => {
       // 끝 실과 후방 실 사이에 사람이 다닐 통로가 항상 남는다
       const bandX0 = techSide === "left" ? techBandW + M + DOOR_CLEAR : corridor.x1 + 10;
       const xMax = techSide === "left" ? corridor.x0 - 10 : W - techBandW - M - DOOR_CLEAR;
-      // 간호처치실이 N.S 옆 스트립으로 올라간 경우 환자 밴드에서는 제외한다
-      const bandKeys = patientKeys.filter((k) => !(treatInStrip && k === "treatment_room"));
+      // 간호처치실·조제실이 N.S 옆 스트립으로 올라간 경우 환자 밴드에서는 제외한다
+      const bandKeys = patientKeys.filter((k) => !inStrip(k));
       // techSide=right면 출입구(왼쪽)부터 채우므로 순서를 뒤집는다
       const orderKeys = techSide === "left" ? [...bandKeys] : [...bandKeys].reverse();
       // 폭 부족 시 출입구에서 먼 실(조제·처치)부터 제외해 대기·탈의실을 보장
@@ -1446,31 +1458,33 @@ const FloorCanvas = (() => {
       eye.meta = { key: "annotation", label: "N.S 관찰 시야" };
       canvas.add(eye);
     }
-    // ── 간호처치실: N.S 바로 옆에 붙여 처치·투약 동선을 스테이션과 직결 ──
-    // 스트립 안쪽(병상 필드 쪽) 방향으로 N.S와 벽을 공유한다 (27bed 도면 구성).
-    let treatZone = null;
-    if (treatInStrip && nsZone) {
-      const trW = treatStripW;
+    // ── 간호처치실·조제실: N.S에서 바깥쪽으로 이어 붙여 스테이션과 직결 ──
+    // techSide=left면 스트립이 오른쪽 벽에 붙으므로 N.S 왼쪽으로,
+    // techSide=right면 오른쪽으로 [N.S][처치실][조제실] 순으로 벽을 공유한다.
+    const stripZones = [];
+    if (nsZone && stripPlan.length) {
       // 스트립 높이(격리실·N.S 중 깊은 쪽)에 맞춰 아래 병상 밴드와 라인을 맞춘다
-      const trH = Math.max(bH("treatment_room"), stripBottom - M);
-      // techSide=left → 스트립이 오른쪽 벽에 붙으므로 처치실은 N.S 왼쪽
-      const trX = techSide === "left" ? nsZone.left - trW : nsZone.right;
-      if (trX >= fieldX0 && trX + trW <= fieldX1 && !hitLocked(trX, M, trW, trH)) {
-        addEquipment("treatment_room", { left: trX, top: M, width: trW, height: trH, silent: true });
+      const rowH = Math.max(stripBottom - M, ...stripPlan.map((r) => bH(r.key)));
+      let edge = techSide === "left" ? nsZone.left : nsZone.right; // 다음 실이 붙을 경계
+      stripPlan.forEach(({ key, w }) => {
+        const rx = techSide === "left" ? edge - w : edge;
+        if (rx < fieldX0 || rx + w > fieldX1 || hitLocked(rx, M, w, rowH)) return;
+        addEquipment(key, { left: rx, top: M, width: w, height: rowH, silent: true });
         // 문은 아래쪽(병상 필드 = N.S 관찰 구역) 벽 중앙 — 스테이션과 바로 통한다
-        const ndx = trX + Math.round(trW / 2);
-        addDoor("swing_door", { anchor: { x: ndx, y: M + trH }, roomSide: "bottom", silent: true });
-        populateRoom("treatment_room", trX, M, trW, trH,
-          [{ x0: ndx - 70, x1: ndx + 70, y0: M + trH - 110, y1: M + trH + 5 }]);
-        treatZone = { left: trX, right: trX + trW, top: M, bottom: M + trH };
-        stripBottom = Math.max(stripBottom, treatZone.bottom);
-      }
+        const dx = rx + Math.round(w / 2);
+        addDoor("swing_door", { anchor: { x: dx, y: M + rowH }, roomSide: "bottom", silent: true });
+        populateRoom(key, rx, M, w, rowH,
+          [{ x0: dx - 70, x1: dx + 70, y0: M + rowH - 110, y1: M + rowH + 5 }]);
+        stripZones.push({ key, left: rx, right: rx + w, top: M, bottom: M + rowH });
+        stripBottom = Math.max(stripBottom, M + rowH);
+        edge = techSide === "left" ? rx : rx + w; // 다음 실은 이 실의 바깥쪽에 붙는다
+      });
     }
 
     // 스트립이 차지하고 남는 상단 폭 계산 → 모듈 2개 미만이면 밴드는 아래에서 시작
     const stripUsed = (isoZone ? isoZone.right - isoZone.left + 45 : 0) +
                       (nsZone ? nsZone.right - nsZone.left + 45 : 0) +
-                      (treatZone ? treatZone.right - treatZone.left + 45 : 0);
+                      stripZones.reduce((s, z) => s + (z.right - z.left) + 45, 0);
     const bandsBelowStrip = stripBottom > 0 &&
       (fieldX1 - fieldX0) - stripUsed < moduleWidth * 2 + 40;
 
@@ -1486,9 +1500,9 @@ const FloorCanvas = (() => {
     /** 지정한 세로 구간에서 격리실·N.S 아일랜드를 피한 병상 배치 가능 x 범위 */
     const boundsFor = (yTop, yBottom) => {
       let rx0 = fieldX0, rx1 = fieldX1;
-      // 상단 스트립(격리실·N.S·간호사실)은 한쪽 벽에 붙어 이어지므로 하나의
+      // 상단 스트립(격리실·N.S·처치실·조제실)은 한쪽 벽에 붙어 이어지므로 하나의
       // 구간으로 합쳐서 잘라낸다 — 사이사이에 병상을 끼워 넣어 조각내지 않는다
-      const hit = [isoZone, nsZone, treatZone]
+      const hit = [isoZone, nsZone, ...stripZones]
         .filter((z) => z && yBottom >= z.top - 40 && yTop <= z.bottom + 40);
       if (hit.length) {
         const left = Math.min(...hit.map((z) => z.left));
