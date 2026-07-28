@@ -525,6 +525,7 @@ const FloorCanvas = (() => {
     const grp = new fabric.Group([line, tag]);
     grp.meta = { key: "pipe", pipeType: type, label: spec.label };
     canvas.add(grp);
+    applyLayerTo(grp); // 배관 레이어를 숨겨 둔 상태면 새 배관도 숨김을 따른다
     return grp;
   }
 
@@ -2402,35 +2403,48 @@ const FloorCanvas = (() => {
     canvas.requestRenderAll();
   }
 
-  /* ───────────────── 레이어 (동선 · 치수) ─────────────────
-   * 동선·치수 표기는 도면 본체와 분리된 레이어로 관리한다.
+  /* ───────────────── 레이어 (동선 · 치수 · 배관) ─────────────────
+   * 동선·치수 표기와 급수/배수 배관은 도면 본체와 분리된 레이어로 관리한다.
    * 표시/숨김 · 편집 잠금 해제(선택·이동·삭제) · 레이어 통째 삭제가 가능하며,
-   * 레이어 상태는 JSON 저장에 함께 직렬화된다. */
+   * 레이어 상태는 JSON 저장에 함께 직렬화된다.
+   * 배관은 원래 자유롭게 옮길 수 있었으므로 편집 잠금 없이(locked: false) 시작한다. */
   const LAYERS = {
     flow: { label: "동선 표시", visible: true, locked: true },
     dim: { label: "치수선", visible: true, locked: true },
+    pipe_inlet: { label: "급수 배관 (Inlet)", visible: true, locked: false },
+    pipe_drain: { label: "배수 배관 (Drain)", visible: true, locked: false },
   };
 
-  /** 주석 객체를 라벨로 레이어에 배정한다 (도면 본체 주석은 레이어 없음) */
+  /** 객체를 종류·라벨로 레이어에 배정한다 (도면 본체는 레이어 없음) */
   function layerOf(o) {
-    if (!o.meta || o.meta.key !== "annotation") return null;
+    if (!o.meta) return null;
+    // 급수/배수 배관은 계통별로 나눠 따로 켜고 끌 수 있게 한다
+    if (o.meta.key === "pipe") {
+      return o.meta.pipeType === "drain" ? "pipe_drain" : "pipe_inlet";
+    }
+    if (o.meta.key !== "annotation") return null;
     if (o.meta.label === "치수") return "dim";
-    if (["벽체 두께 주석", "RO 인계점"].includes(o.meta.label)) return null;
+    if (o.meta.label === "RO 인계점") return "pipe_inlet"; // 배관 시작점 표기
+    if (o.meta.label === "벽체 두께 주석") return null;
     return "flow"; // 주 동선·보조 동선·복도 음영·화살표·관찰 시야 등
+  }
+
+  /** 객체 하나에 레이어 상태를 반영 (레이어가 없는 객체는 그대로 둔다) */
+  function applyLayerTo(o) {
+    const key = o.meta && (o.meta.layer ?? layerOf(o));
+    if (!key || !LAYERS[key]) return;
+    o.meta.layer = key;
+    const L = LAYERS[key];
+    o.visible = L.visible;
+    // 개별 잠금(🔒)은 레이어 설정보다 우선한다 — 잠근 객체가 풀리지 않게 한다
+    o.selectable = L.visible && !L.locked && !o.meta.locked;
+    o.evented = o.selectable;
+    o.setCoords();
   }
 
   /** 레이어 상태를 캔버스 객체에 반영 */
   function applyLayers() {
-    canvas.getObjects().forEach((o) => {
-      const key = o.meta && (o.meta.layer ?? layerOf(o));
-      if (!key || !LAYERS[key]) return;
-      o.meta.layer = key;
-      const L = LAYERS[key];
-      o.visible = L.visible;
-      o.selectable = L.visible && !L.locked;
-      o.evented = o.selectable;
-      o.setCoords();
-    });
+    canvas.getObjects().forEach(applyLayerTo);
     canvas.requestRenderAll();
   }
 
@@ -2475,6 +2489,9 @@ const FloorCanvas = (() => {
     return {
       version: 1,
       room,
+      // 레이어 표시/편집 상태 — 다른 PC에서 열어도 켜고 끈 그대로 복원된다
+      layers: Object.fromEntries(Object.entries(LAYERS)
+        .map(([k, v]) => [k, { visible: v.visible, locked: v.locked }])),
       canvas: canvas.toJSON(["meta", "selectable", "evented"]),
     };
   }
@@ -2482,8 +2499,14 @@ const FloorCanvas = (() => {
   function loadJSON(data, done) {
     beginBulk();
     room = data.room;
+    // 저장된 레이어 상태를 먼저 복원한 뒤 객체에 반영한다
+    Object.entries(data.layers ?? {}).forEach(([k, v]) => {
+      if (!LAYERS[k]) return;
+      if (v.visible !== undefined) LAYERS[k].visible = !!v.visible;
+      if (v.locked !== undefined) LAYERS[k].locked = !!v.locked;
+    });
     canvas.loadFromJSON(data.canvas, () => {
-      applyLayers(); // 불러온 도면도 현재 레이어 상태를 따르게 한다
+      applyLayers(); // 불러온 도면도 복원된 레이어 상태를 따르게 한다
       endBulk();
       // 잠금 상태 복원 (lockMovement 등은 직렬화되지 않으므로 meta로 재적용)
       canvas.getObjects().forEach((o) => {

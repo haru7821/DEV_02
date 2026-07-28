@@ -100,6 +100,17 @@
     return sizes;
   }
 
+  /** 레이어 패널 체크박스를 현재 레이어 상태에 맞춘다 (도면을 불러온 뒤 호출) */
+  function syncLayerPanel() {
+    const L = FloorCanvas.getLayers();
+    Object.entries(L).forEach(([k, v]) => {
+      const vis = document.querySelector(`#layer-panel input[data-lv="${k}"]`);
+      const edit = document.querySelector(`#layer-panel input[data-le="${k}"]`);
+      if (vis) vis.checked = v.visible;
+      if (edit) { edit.checked = !v.locked; edit.disabled = !v.visible; }
+    });
+  }
+
   function buildToolbar() {
     buildFacilityChecks();
     // 병상 모듈(침대+투석기+모니터, 폭 = 모듈 폭 설정값) 원클릭 추가 버튼
@@ -373,6 +384,7 @@
     Object.entries(p.data.customAssets ?? {}).forEach(([k, s]) => registerCustomAsset(k, s));
     applySettings(p.data.settings);
     FloorCanvas.loadJSON(p.data, () => {
+      syncLayerPanel(); // 저장 시점의 레이어 표시/편집 상태를 체크박스에 반영
       $("validation-report").textContent = "아직 검증하지 않았습니다.";
       toast(`「${name}」 도면을 불러왔습니다.`, "info");
     });
@@ -428,7 +440,10 @@
         const data = JSON.parse(reader.result);
         Object.entries(data.customAssets ?? {}).forEach(([k, s]) => registerCustomAsset(k, s));
         applySettings(data.settings); // 저장 시점의 Auto Modeling 설정도 복원
-        FloorCanvas.loadJSON(data, () => toast("도면을 불러왔습니다.", "info"));
+        FloorCanvas.loadJSON(data, () => {
+          syncLayerPanel();
+          toast("도면을 불러왔습니다.", "info");
+        });
       } catch (e) {
         toast("JSON 파일을 읽을 수 없습니다: " + e.message);
       }
@@ -594,6 +609,15 @@
       Object.entries(PIPE_BUTTONS).forEach(([id, b]) => { $(id).textContent = b.label; });
     Object.entries(PIPE_BUTTONS).forEach(([id, b]) => {
       $(id).addEventListener("click", () => {
+        // 해당 배관 레이어를 숨겨 뒀으면 새로 그려도 안 보인다 — 미리 켜준다
+        const lk = b.type === "drain" ? "pipe_drain" : "pipe_inlet";
+        const layer = FloorCanvas.getLayers()[lk];
+        if (layer && !layer.visible) {
+          FloorCanvas.setLayer(lk, { visible: true });
+          const el = document.querySelector(`#layer-panel input[data-lv="${lk}"]`);
+          if (el) el.checked = true;
+          toast(`숨겨 둔 「${layer.label}」 레이어를 다시 켰습니다.`, "info");
+        }
         const on = FloorCanvas.togglePipeMode(b.type);
         resetPipeButtons();
         if (on) {

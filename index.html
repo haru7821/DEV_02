@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>인공신장실 도면 에디터</title>
-  <link rel="stylesheet" href="style.css?v=20260728s" />
+  <link rel="stylesheet" href="style.css?v=20260728t" />
   <!-- Fabric.js : 캔버스 객체 제어 (오프라인 환경 대비 로컬 번들) -->
   <script src="vendor/fabric.min.js"></script>
   <!-- jsPDF : PDF(가로모드) 출력 -->
@@ -169,7 +169,20 @@
             <label title="선택·이동·삭제 허용"><input type="checkbox" data-le="dim" /> 편집</label>
             <button class="layer-del" data-ld="dim" title="이 레이어의 모든 치수선을 삭제 (Ctrl+Z로 복구)">삭제</button>
           </div>
-          <p class="layer-hint">「편집」을 켜면 해당 표기를 클릭해 옮기거나 Del 키로 지울 수 있습니다.</p>
+          <div class="layer-row" data-layer="pipe_inlet">
+            <span class="layer-name"><span class="layer-swatch" style="background:#1565C0"></span>급수 배관 (IN)</span>
+            <label title="도면에 표시"><input type="checkbox" data-lv="pipe_inlet" checked /> 표시</label>
+            <label title="선택·이동·삭제 허용"><input type="checkbox" data-le="pipe_inlet" checked /> 편집</label>
+            <button class="layer-del" data-ld="pipe_inlet" title="급수 배관을 모두 삭제 (Ctrl+Z로 복구)">삭제</button>
+          </div>
+          <div class="layer-row" data-layer="pipe_drain">
+            <span class="layer-name"><span class="layer-swatch" style="background:#6D4C41"></span>배수 배관 (DR)</span>
+            <label title="도면에 표시"><input type="checkbox" data-lv="pipe_drain" checked /> 표시</label>
+            <label title="선택·이동·삭제 허용"><input type="checkbox" data-le="pipe_drain" checked /> 편집</label>
+            <button class="layer-del" data-ld="pipe_drain" title="배수 배관을 모두 삭제 (Ctrl+Z로 복구)">삭제</button>
+          </div>
+          <p class="layer-hint">「편집」을 켜면 해당 표기를 클릭해 옮기거나 Del 키로 지울 수 있습니다.
+            배관은 계통별로 켜고 끌 수 있어 급수·배수를 따로 검토할 수 있습니다.</p>
         </div>
       </details>
 
@@ -223,10 +236,10 @@
   <script src="vendor/three/OrbitControls.js"></script>
   <script src="vendor/three/GLTFExporter.js"></script>
   <script src="vendor/three/OBJExporter.js"></script>
-  <script src="js/assets.js?v=20260728s"></script>
-  <script src="js/canvas.js?v=20260728s"></script>
-  <script src="js/validation.js?v=20260728s"></script>
-  <script src="js/view3d.js?v=20260728s"></script>
-  <script src="js/app.js?v=20260728s"></script>
+  <script src="js/assets.js?v=20260728t"></script>
+  <script src="js/canvas.js?v=20260728t"></script>
+  <script src="js/validation.js?v=20260728t"></script>
+  <script src="js/view3d.js?v=20260728t"></script>
+  <script src="js/app.js?v=20260728t"></script>
 </body>
 </html>

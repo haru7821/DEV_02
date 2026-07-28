@@ -436,7 +436,14 @@ h3 + .edit-grid { margin-top: 2px; }
   border-bottom: 1px solid #f0f2f3;
 }
 .layer-row:last-of-type { border-bottom: none; }
-.layer-name { flex: 1; font-weight: 600; }
+.layer-name { flex: 1; font-weight: 600; display: flex; align-items: center; gap: 5px; }
+/* 배관 계통 색상 견본 — 도면의 급수(파랑)·배수(갈색) 선 색과 맞춘다 */
+.layer-swatch {
+  width: 12px;
+  height: 4px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
 .layer-row label { display: flex; align-items: center; gap: 3px; cursor: pointer; white-space: nowrap; }
 .layer-row input { accent-color: #00897b; }
 .layer-del {
