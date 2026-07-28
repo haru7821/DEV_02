@@ -145,6 +145,13 @@ const View3D = (() => {
     wrap.rotation.y = -((o.angle || 0) * Math.PI) / 180;
     group.add(wrap);
 
+    // 열리는 방향(로컬 Z 부호). 2D 문 심볼은 문짝·개폐 궤적을 로컬 -Y에 그리고,
+    // addDoor의 roomSide 각도가 그 -Y를 '열리는 쪽'으로 돌려놓는다. 캔버스 y ≡ 3D z
+    // 이므로 3D에서도 로컬 -Z가 열리는 쪽 — 2D 도면의 개폐 방향을 그대로 따른다.
+    // (개폐 방향의 단일 기준은 addDoor의 roomSide다. 기본은 실 안쪽,
+    //  정수실만 바깥여닫이 — canvas.js의 wallDoor opts.outward 참고)
+    const IN = -1;
+
     const leaf = (len, hingeX, dir, angle) => {
       // 로컬 X축을 따라 개구부가 놓인다. hingeX에서 angle만큼 열린 문짝.
       const pivot = new THREE.Group();
@@ -157,18 +164,20 @@ const View3D = (() => {
       pivot.add(m);
       wrap.add(pivot);
     };
+    // 힌지에서 dir 쪽으로 뻗은 문짝이 실 안쪽(IN)으로 젖혀지는 회전각
+    const openAngle = (dir) => -IN * dir * OPEN_DEG * Math.PI / 180;
 
-    if (kind === "double_swing_door") {           // 양짝: 양쪽에서 각각 열림
-      leaf(dw / 2, -dw / 2, 1, -OPEN_DEG * Math.PI / 180);
-      leaf(dw / 2, dw / 2, -1, OPEN_DEG * Math.PI / 180);
-    } else if (kind === "swing_door") {           // 외짝 여닫이
-      leaf(dw, -dw / 2, 1, -OPEN_DEG * Math.PI / 180);
+    if (kind === "double_swing_door") {           // 양짝: 양쪽에서 각각 안쪽으로
+      leaf(dw / 2, -dw / 2, 1, openAngle(1));
+      leaf(dw / 2, dw / 2, -1, openAngle(-1));
+    } else if (kind === "swing_door") {           // 외짝 여닫이 — 안쪽으로
+      leaf(dw, -dw / 2, 1, openAngle(1));
     } else {                                      // 미닫이·자동문: 열린 상태
       // 문짝을 개구부 밖으로 완전히 밀어낸다. 개구부 안에는 아무것도 두지 않아야
       // 밖에서 봤을 때 뚫려 보이고, 통행 가능 폭이 그대로 읽힌다.
       const glass = kind === "auto_door";
       const pmat = glass ? MAT.glass : mat;
-      const off = M(WALL_T / 2 + DOOR_LEAF_T / 2);  // 벽 두께 밖 — 벽면에 붙은 패널
+      const off = IN * M(WALL_T / 2 + DOOR_LEAF_T / 2);  // 실 안쪽 벽면에 붙은 패널
       const panel = (len, cx) => {
         const m = new THREE.Mesh(
           new THREE.BoxGeometry(M(len), DOOR_H, M(DOOR_LEAF_T)), pmat);

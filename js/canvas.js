@@ -678,7 +678,7 @@ const FloorCanvas = (() => {
     addDoor("auto_door", { anchor: { x: nurseX - 130, y: H }, roomSide: "bottom", silent: true }); // 주 출입구
     addDoor("swing_door", { anchor: { x: M + 100, y: H - 260 }, roomSide: "top", silent: true });  // 탈의실
     addDoor("swing_door", { anchor: { x: 295, y: H - 210 }, roomSide: "top", silent: true });      // 화장실
-    addDoor("swing_door", { anchor: { x: 310, y: 210 }, roomSide: "right", silent: true });        // 정수실
+    addDoor("swing_door", { anchor: { x: 310, y: 210 }, roomSide: "left", silent: true });         // 정수실 (바깥여닫이)
     addDoor("swing_door", { anchor: { x: 210, y: 520 }, roomSide: "right", silent: true });        // 창고
     if (hasIsolation) {
       addDoor("sliding_door", { anchor: { x: W - isoW / 2 - M, y: 310 }, roomSide: "bottom", silent: true }); // 격리실
@@ -1345,6 +1345,8 @@ const FloorCanvas = (() => {
        * kind : 문 종류, c : 열 번호, ty/h : 실의 세로 위치·높이
        * opts.outer : true면 외벽 쪽 변, 기본은 복도(또는 병상 필드) 쪽 변
        * opts.width : 문 폭(cm) 재정의 — 예) 정수실 장비 반입용 1000mm
+       * opts.outward : true면 바깥여닫이 — 정수실처럼 실 안쪽에 문짝을
+       *   젖힐 공간이 없는 실에 쓴다 (roomSide를 반대로 줘서 문짝을 밖으로 그린다)
        * 반환값은 문 앞 금지 구역(오브젝트 배치 회피용)
        *
        * 문 앵커 보정: angle 90은 앵커 기준 왼쪽·아래로, 270은 오른쪽·위로
@@ -1357,8 +1359,10 @@ const FloorCanvas = (() => {
         const onRight = opts.outer ? !innerIsRight : innerIsRight;
         const edge = onRight ? colX(c) + colW : colX(c);
         // 실 기준: 오른쪽 벽이면 roomSide "right"(실이 왼쪽) → 안쪽으로 열림
+        // outward면 반대 변을 실로 간주해 문짝이 실 밖으로 젖혀지게 한다
+        const swingRight = opts.outward ? !onRight : onRight;
         addDoor(kind, {
-          anchor: { x: edge, y: my }, roomSide: onRight ? "right" : "left",
+          anchor: { x: edge, y: my }, roomSide: swingRight ? "right" : "left",
           width: opts.width, silent: true,
         });
         return onRight
@@ -1372,8 +1376,9 @@ const FloorCanvas = (() => {
         const wtH = sH("water_treatment");
         wtTop = H - patientBandH - M - wtH;
         addEquipment("water_treatment", { left: colX(0), top: wtTop, width: colW, height: wtH, silent: true });
-        // 정수실 문: 탱크·RO 반입을 위해 1000mm 폭, 벽면 중앙
-        const wtZone = wallDoor("swing_door", 0, wtTop, wtH, { width: 100 });
+        // 정수실 문: 탱크·RO 반입을 위해 1000mm 폭, 벽면 중앙.
+        // RO 유닛·염수탱크가 벽면을 채워 문짝을 안으로 젖힐 수 없다 → 바깥여닫이
+        const wtZone = wallDoor("swing_door", 0, wtTop, wtH, { width: 100, outward: true });
         populateRoom("water_treatment", colX(0), wtTop, colW, wtH, [wtZone]);
       }
       // 나머지 후방 실은 정수실 위에서부터 아래→위로 적층하고,
