@@ -293,18 +293,6 @@
       e.target.value = "";
     });
     $("snap-size").addEventListener("change", (e) => FloorCanvas.setSnap(+e.target.value));
-    $("btn-auto-layout").addEventListener("click", () => {
-      FloorCanvas.setWallThickness(toCM(+$("wall-thickness").value));
-      FloorCanvas.setConsoleDepth(toCM(+$("console-depth").value));
-      // 배경 도면 사진이 있으면 사진 크기를 유지, 없으면 입력값(mm)으로 새 도면 생성
-      if (!FloorCanvas.getCanvas().backgroundImage) {
-        const w = toCM(+$("room-width").value), h = toCM(+$("room-height").value);
-        if (w < 300 || h < 300) return toast("병실 크기는 최소 3,000mm × 3,000mm 이상이어야 합니다.");
-        FloorCanvas.newRoom(w, h);
-      }
-      const { beds } = FloorCanvas.autoLayout();
-      toast(`자동 배치 완료: 병상 ${beds}개 + 부속실 + 급수/배수 배관.\n'검증' 버튼으로 규격을 확인하세요.`, "info", 5000);
-    });
     // Auto Modeling: 선택 시설 + 목표 병상 대수로 매번 다른 랜덤 구성 생성
     $("btn-auto-model").addEventListener("click", () => {
       FloorCanvas.setWallThickness(toCM(+$("wall-thickness").value));

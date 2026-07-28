@@ -851,6 +851,43 @@ const FloorCanvas = (() => {
     }
   }
 
+  /* ───────────────── N.S 아일랜드 (U자형 개방 카운터) ─────────────────
+   * 참고 도면의 간호 스테이션: 병상 필드 안에 독립 배치된 U자 카운터로,
+   * 개방면이 병상 쪽을 향해 모든 병상 열을 관찰한다. 내부에 2인 데스크
+   * 유닛(stationSeats/2 조)을 배치한다. */
+  function addStationIsland(x, y, seats) {
+    const desks = Math.min(4, Math.ceil((seats ?? stationSeats) / 2));
+    const perRow = desks > 2 ? 2 : 1;
+    const rows = Math.ceil(desks / perRow);
+    const bar = 35;
+    const w = 70 + perRow * 172;
+    const h = bar + 25 + rows * 112;
+    const col = "#FF9800";
+    const mk = (left, top, bw, bh) => new fabric.Rect({
+      left, top, width: bw, height: bh, rx: 12, ry: 12,
+      fill: col + "55", stroke: col, strokeWidth: 3,
+    });
+    const parts = [
+      mk(0, 0, w, bar),          // 상부 바 (닫힌 면)
+      mk(0, 0, bar, h),          // 좌측 팔
+      mk(w - bar, 0, bar, h),    // 우측 팔 — 아래(병상 필드)가 개방면
+      new fabric.Text("N.S", {
+        fontSize: 30, fontWeight: "bold", fill: "#E65100",
+        left: w / 2, top: 4, originX: "center",
+      }),
+    ];
+    const grp = new fabric.Group(parts, { left: x, top: y });
+    grp.meta = { key: "nurse_station", label: "간호 스테이션 (N.S)", type: "room" };
+    canvas.add(grp);
+    applyBlueprintToObject(grp);
+    // U자 안쪽 2인 데스크 유닛 — 개방면(아래)을 향해 착석
+    for (let i = 0; i < desks; i++) {
+      const ci = i % perRow, ri = Math.floor(i / perRow);
+      addEquipment("station_desk2", { left: x + 42 + ci * 172, top: y + bar + 8 + ri * 112, silent: true });
+    }
+    return { grp, w, h };
+  }
+
   /* ───────────────── Auto Modeling: 랜덤 변형 자동 설계 ─────────────────
    * 선택한 시설 + 목표 병상 대수를 받아, 시드 난수로 배치 변수(서비스 존
    * 방향·통로 폭·병상 간격·시설 순서)를 바꿔가며 매번 다른 도면을 생성한다.
@@ -898,12 +935,15 @@ const FloorCanvas = (() => {
     const TECH_ORDER = { core: 0, storage: 1, linen_room: 2, clean_room: 3, laundry_room: 4, waste_room: 5 };
     const techKeys = chosen.filter((k) => TECH.includes(k) && k !== "water_treatment")
       .sort((a, b) => (TECH_ORDER[a] ?? 9) - (TECH_ORDER[b] ?? 9));
-    // 참고 도면 분석 ②: 환자 밴드는 안쪽(진료 지원: 상담·과장·조제·처치)에서
-    // 출입구 쪽(환자 프런트: 화장실→탈의실→대기실→스테이션) 순 —
-    // 환자 동선(출입구→대기→탈의→병상)과 직원 동선(스테이션↔조제/처치)이
-    // 교차하지 않고, 스테이션은 출입구와 병상 필드를 동시에 관찰한다.
-    const PATIENT_ORDER = { pharmacy_room: 1, treatment_room: 2, toilet: 4, changing_room: 5, waiting_area: 6, nurse_station: 7 };
-    const patientKeys = shuffle(chosen.filter((k) => !TECH.includes(k) && k !== "isolation_room" && k !== "water_treatment"))
+    // 참고 도면 분석 ②: N.S는 병상 필드 안 'U자 아일랜드'로 독립 배치(별도 처리),
+    // 간호처치실·조제실은 N.S와 같은 동선 쪽 끝에 인접시킨다.
+    // 환자 밴드는 안쪽(직원 지원: 상담·과장)→환자 프런트(화장실→탈의→대기)→
+    // 동선 쪽 끝(처치→조제) 순 — 환자 동선(출입구→대기→탈의→병상)과
+    // 직원 동선(N.S↔조제/처치)이 교차하지 않는다.
+    const hasNS = chosen.includes("nurse_station");
+    const PATIENT_ORDER = { toilet: 3, changing_room: 4, waiting_area: 5, treatment_room: 6, pharmacy_room: 7 };
+    const patientKeys = shuffle(chosen.filter((k) =>
+      !TECH.includes(k) && !["isolation_room", "water_treatment", "nurse_station"].includes(k)))
       .sort((a, b) => (PATIENT_ORDER[a] ?? 0) - (PATIENT_ORDER[b] ?? 0));
 
     // ── 부속시설 : 병상 필드 ≈ 1:1 면적 배분 — 실 크기를 배율 k로 확대 ──
@@ -993,13 +1033,13 @@ const FloorCanvas = (() => {
     addDoor("auto_door", { left: ex, top: H - 4, silent: true });
 
     // ── 환자 밴드: 하단 벽 가로 배치 (세로 깊이 통일) ──
-    // 스테이션은 주 동선(출입구) 바로 옆 끝자리 — 출입구와 병상 필드 동시 관찰
-    let nurseRect = null;
+    // 참고 도면 순서: 안쪽(직원 지원) → 환자 프런트(화장실·탈의·대기) →
+    // 동선 쪽 끝(간호처치실·조제실) — 처치/조제실이 N.S와 같은 동선에 붙는다
     {
       const bandX0 = techSide === "left" ? techBandW + 40 : corridor.x1 + 10;
       const xMax = techSide === "left" ? corridor.x0 - 10 : W - techBandW - 40;
       // techSide=right면 출입구(왼쪽)부터 채우므로 순서를 뒤집어
-      // 간호사실이 첫 자리(출입구 옆)에 오게 한다
+      // 처치·조제실이 동선 쪽 첫 자리에 오게 한다
       const orderKeys = techSide === "left" ? [...patientKeys] : [...patientKeys].reverse();
       // 폭 부족 시 우선순위 낮은(안쪽 지원) 실부터 제외해 프런트 실을 보장
       const fitKeys = [...orderKeys];
@@ -1014,25 +1054,11 @@ const FloorCanvas = (() => {
         if (px + w > xMax) return;
         const roomTop = H - patientBandH - M;
         addEquipment(key, { left: px, top: roomTop, width: w, height: patientBandH, silent: true });
-        if (key === "nurse_station") {
-          // 조건 ①: 스테이션은 문 대신 병상 필드를 향한 개방 카운터 —
-          // 환자·장비를 항상 관찰할 수 있는 시야를 확보한다
-          const open = new fabric.Rect({
-            left: px + w * 0.2, top: roomTop - 7,
-            width: w * 0.6, height: 14,
-            fill: "#ffffff", stroke: "#FF9800", strokeWidth: 1.5, strokeDashArray: [8, 6],
-            selectable: false, evented: false,
-          });
-          open.meta = { key: "annotation", label: "스테이션 개방면(관찰 시야)" };
-          canvas.add(open);
-          nurseRect = { left: px, width: w };
-        } else {
-          // 문: 위쪽 변(복도 쪽)에 달고 실 내부(아래)로 열리는 여닫이문
-          addDoor("swing_door", { left: px + 110, top: roomTop + 90, angle: 180, silent: true });
-        }
+        // 문: 위쪽 변(복도 쪽)에 달고 실 내부(아래)로 열리는 여닫이문
+        addDoor("swing_door", { left: px + 110, top: roomTop + 90, angle: 180, silent: true });
         // 문 개폐 구역(상단 좌측)을 피해서 기본 오브젝트 배치
         populateRoom(key, px, roomTop, w, patientBandH,
-          key === "nurse_station" ? [] : [{ x0: px + 15, x1: px + 120, y0: roomTop - 5, y1: roomTop + 100 }]);
+          [{ x0: px + 15, x1: px + 120, y0: roomTop - 5, y1: roomTop + 100 }]);
         px += w + 10;
       });
     }
@@ -1052,7 +1078,31 @@ const FloorCanvas = (() => {
         isoBedGrp = addBedUnit(ix + 60, M + 40, true);
         placedBeds.push({ grp: isoBedGrp, rowY: M + 40 });
       }
-      isoZone = { left: ix, right: ix + spec.width, bottom: M + spec.height };
+      isoZone = { left: ix, right: ix + spec.width, top: M, bottom: M + spec.height };
+    }
+
+    // ── N.S 아일랜드: 병상 필드 상단, 주 동선 옆 (참고 도면의 U자 카운터) ──
+    // 개방면이 병상 쪽(아래)을 향해 모든 병상 열을 한눈에 관찰하고,
+    // 주 동선에 접해 있어 출입구·처치실·조제실과의 동선이 짧다.
+    let nsZone = null;
+    if (hasNS) {
+      const probe = { desks: Math.min(4, Math.ceil(stationSeats / 2)) };
+      const perRow = probe.desks > 2 ? 2 : 1;
+      const nsW = 70 + perRow * 172;
+      let nsX = techSide === "left" ? corridor.x0 - nsW - 20 : corridor.x1 + 20;
+      let nsY = M + 20;
+      // 격리실과 겹치면 아래로 내린다
+      if (isoZone && nsX < isoZone.right && nsX + nsW > isoZone.left) nsY = isoZone.bottom + 30;
+      nsX = Math.max(fieldX0, Math.min(nsX, fieldX1 - nsW));
+      const ns = addStationIsland(nsX, nsY, stationSeats);
+      nsZone = { left: nsX, right: nsX + ns.w, top: nsY, bottom: nsY + ns.h };
+      // 관찰 시야 표시: 개방면(아래)에서 병상 필드로 향하는 시야각
+      const eye = new fabric.Text("▽ 관찰 시야", {
+        left: nsX + ns.w / 2, top: nsY + ns.h + 6, fontSize: 20, fill: "#E65100",
+        originX: "center", selectable: false, evented: false,
+      });
+      eye.meta = { key: "annotation", label: "N.S 관찰 시야" };
+      canvas.add(eye);
     }
 
     // ── 병상 필드: 콘솔 양면(back-to-back) 밴드 구조 ──
@@ -1064,12 +1114,23 @@ const FloorCanvas = (() => {
     const pitch = MW;
 
     /** 한 행 채우기: 통로·격리실을 피해 좌→우로 병상 유닛 배치 */
-    const fillRow = (yBed, headDown) => {
+    /** 지정한 세로 구간에서 격리실·N.S 아일랜드를 피한 병상 배치 가능 x 범위 */
+    const boundsFor = (yTop, yBottom) => {
       let rx0 = fieldX0, rx1 = fieldX1;
-      if (isoZone && yBed < isoZone.bottom + 40) { // 격리실 높이 구간은 회피
-        if (techSide === "left") rx1 = Math.min(rx1, isoZone.left - 45);
-        else rx0 = Math.max(rx0, isoZone.right + 45);
-      }
+      [isoZone, nsZone].forEach((z) => {
+        if (!z) return;
+        if (yBottom < z.top - 40 || yTop > z.bottom + 40) return; // 세로로 안 겹침
+        const fieldMid = (fieldX0 + fieldX1) / 2;
+        if ((z.left + z.right) / 2 > fieldMid) rx1 = Math.min(rx1, z.left - 45);
+        else rx0 = Math.max(rx0, z.right + 45);
+      });
+      return { rx0, rx1 };
+    };
+
+    // 밴드 내 위/아래 행은 동일한 x 범위를 사용해 모듈이 세로로 정렬되게 한다
+    // (행이 어긋나면 콘솔 건너편 병상과 대각선 간격이 좁아진다)
+    const fillRow = (yBed, headDown, bounds) => {
+      let { rx0, rx1 } = bounds ?? boundsFor(yBed, yBed + 220);
       const row = [];
       let x = rx0;
       while (x + MW <= rx1 && placedBeds.length < target) {
@@ -1110,9 +1171,10 @@ const FloorCanvas = (() => {
     let by = Math.max(M + 20, MEDICAL_RULES.FOOT_WALL_CLEARANCE_CM);
     while (placedBeds.length < target && by + 220 + CD + 220 <= fieldY1) {
       // 양면 밴드: 위 행(머리 아래쪽) + 콘솔 + 아래 행(머리 위쪽)
-      const above = fillRow(by, true);
+      const bandBounds = boundsFor(by, by + 220 + CD + 6 + 220);
+      const above = fillRow(by, true, bandBounds);
       const consoleY = by + 220 + 3;
-      const below = fillRow(by + 220 + CD + 6, false);
+      const below = fillRow(by + 220 + CD + 6, false, bandBounds);
       if (above.length || below.length) {
         layConsole(consoleY, [...above, ...below]);
         bands.push({ consoleY, above, below });
