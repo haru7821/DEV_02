@@ -104,13 +104,25 @@ const View3D = (() => {
         const b = at(c);
         box(group, b.x, b.y, b.w, b.d, 0.42, MAT.bedFrame);              // 프레임
         box(group, b.x + 4, b.y + 4, b.w - 8, b.d - 8, 0.16, MAT.mattress, 0.42); // 매트리스
-        // 베개: 머리맡 쪽(투석기가 있는 변) — headDown이면 아래쪽
-        const py = unit.meta.headDown ? b.y + b.d - 40 : b.y + 6;
-        box(group, b.x + 15, py, b.w - 30, 34, 0.1, MAT.pillow, 0.58);
+        // 베개는 머리맡(콘솔) 쪽 끝에 놓는다 — 2D의 머리 방향을 그대로 따른다
+        if (unit.meta.vertical) {   // 세로 배치: 머리맡이 좌/우
+          const px = unit.meta.headLeft ? b.x + 6 : b.x + b.w - 40;
+          box(group, px, b.y + 15, 34, b.d - 30, 0.1, MAT.pillow, 0.58);
+        } else {                    // 가로 배치: 머리맡이 위/아래
+          const py = unit.meta.headDown ? b.y + b.d - 40 : b.y + 6;
+          box(group, b.x + 15, py, b.w - 30, 34, 0.1, MAT.pillow, 0.58);
+        }
       } else if (key === "dialysis_machine") {
         const q = at(c);
         box(group, q.x, q.y, q.w, q.d, 1.05, MAT.machine);               // 본체
-        box(group, q.x + 4, q.y + q.d - 6, q.w - 8, 5, 0.34, MAT.screen, 1.05); // 조작 패널
+        // 조작 패널은 환자(침대) 쪽 면에 붙인다
+        if (unit.meta.vertical) {
+          const sx = unit.meta.headLeft ? q.x + q.w - 6 : q.x + 1;
+          box(group, sx, q.y + 4, 5, q.d - 8, 0.34, MAT.screen, 1.05);
+        } else {
+          const sy = unit.meta.headDown ? q.y + 1 : q.y + q.d - 6;
+          box(group, q.x + 4, sy, q.w - 8, 5, 0.34, MAT.screen, 1.05);
+        }
       }
     });
   }
