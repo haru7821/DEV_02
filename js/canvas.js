@@ -1948,6 +1948,7 @@ const FloorCanvas = (() => {
     }
 
     renumberBeds(); // HD1부터 행→열 순으로 부여
+    applyLayers();  // 동선·치수 주석을 레이어 상태에 맞춰 반영
     canvas.discardActiveObject();
     canvas.requestRenderAll();
     endBulk();
@@ -2209,6 +2210,75 @@ const FloorCanvas = (() => {
     canvas.requestRenderAll();
   }
 
+  /* ───────────────── 레이어 (동선 · 치수) ─────────────────
+   * 동선·치수 표기는 도면 본체와 분리된 레이어로 관리한다.
+   * 표시/숨김 · 편집 잠금 해제(선택·이동·삭제) · 레이어 통째 삭제가 가능하며,
+   * 레이어 상태는 JSON 저장에 함께 직렬화된다. */
+  const LAYERS = {
+    flow: { label: "동선 표시", visible: true, locked: true },
+    dim: { label: "치수선", visible: true, locked: true },
+  };
+
+  /** 주석 객체를 라벨로 레이어에 배정한다 (도면 본체 주석은 레이어 없음) */
+  function layerOf(o) {
+    if (!o.meta || o.meta.key !== "annotation") return null;
+    if (o.meta.label === "치수") return "dim";
+    if (["벽체 두께 주석", "RO 인계점"].includes(o.meta.label)) return null;
+    return "flow"; // 주 동선·보조 동선·복도 음영·화살표·관찰 시야 등
+  }
+
+  /** 레이어 상태를 캔버스 객체에 반영 */
+  function applyLayers() {
+    canvas.getObjects().forEach((o) => {
+      const key = o.meta && (o.meta.layer ?? layerOf(o));
+      if (!key || !LAYERS[key]) return;
+      o.meta.layer = key;
+      const L = LAYERS[key];
+      o.visible = L.visible;
+      o.selectable = L.visible && !L.locked;
+      o.evented = o.selectable;
+      o.setCoords();
+    });
+    canvas.requestRenderAll();
+  }
+
+  /** 레이어 표시/잠금 설정 — {visible, locked} 중 지정한 것만 바꾼다 */
+  function setLayer(key, opts = {}) {
+    const L = LAYERS[key];
+    if (!L) return null;
+    if (opts.visible !== undefined) L.visible = !!opts.visible;
+    if (opts.locked !== undefined) L.locked = !!opts.locked;
+    applyLayers();
+    saveHistory();
+    return { ...L };
+  }
+
+  /** 레이어의 모든 객체를 삭제 (되돌리기 가능) */
+  function deleteLayer(key) {
+    if (!LAYERS[key]) return 0;
+    beginBulk();
+    const targets = canvas.getObjects().filter((o) => {
+      const k = o.meta && (o.meta.layer ?? layerOf(o));
+      return k === key;
+    });
+    targets.forEach((o) => canvas.remove(o));
+    canvas.discardActiveObject();
+    endBulk();
+    canvas.requestRenderAll();
+    return targets.length;
+  }
+
+  /** 레이어별 상태와 객체 수 */
+  function getLayers() {
+    const count = {};
+    canvas.getObjects().forEach((o) => {
+      const k = o.meta && (o.meta.layer ?? layerOf(o));
+      if (k) count[k] = (count[k] || 0) + 1;
+    });
+    return Object.fromEntries(Object.entries(LAYERS)
+      .map(([k, v]) => [k, { ...v, count: count[k] || 0 }]));
+  }
+
   function toJSON() {
     return {
       version: 1,
@@ -2221,6 +2291,7 @@ const FloorCanvas = (() => {
     beginBulk();
     room = data.room;
     canvas.loadFromJSON(data.canvas, () => {
+      applyLayers(); // 불러온 도면도 현재 레이어 상태를 따르게 한다
       endBulk();
       // 잠금 상태 복원 (lockMovement 등은 직렬화되지 않으므로 meta로 재적용)
       canvas.getObjects().forEach((o) => {
@@ -2262,6 +2333,7 @@ const FloorCanvas = (() => {
     undo, redo, copySelection, pasteClipboard, duplicateSelection,
     distributeSelection, bringSelectionToFront, sendSelectionToBack,
     flipSelection, rotateSelection, toggleLockSelection, zoomBy, exportSVG,
+    setLayer, deleteLayer, getLayers, applyLayers,
     setSnap: (s) => { snapSize = s; },
     getRoom: () => room,
     getCanvas: () => canvas,

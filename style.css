@@ -412,3 +412,29 @@ h3 + .edit-grid { margin-top: 2px; }
 #view3d-bar button:hover { background: #455a64; }
 #view3d-bar #view3d-close { background: #b71c1c; border-color: #c62828; }
 #view3d-canvas { flex: 1; display: block; width: 100%; }
+
+/* ───────── 레이어 패널 ───────── */
+.layer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #455a64;
+  padding: 5px 0;
+  border-bottom: 1px solid #f0f2f3;
+}
+.layer-row:last-of-type { border-bottom: none; }
+.layer-name { flex: 1; font-weight: 600; }
+.layer-row label { display: flex; align-items: center; gap: 3px; cursor: pointer; white-space: nowrap; }
+.layer-row input { accent-color: #00897b; }
+.layer-del {
+  padding: 3px 8px;
+  border: 1px solid #ef9a9a;
+  border-radius: 5px;
+  background: #fff;
+  color: #c62828;
+  font-size: 11px;
+  cursor: pointer;
+}
+.layer-del:hover { background: #ffebee; }
+.layer-hint { font-size: 11px; color: #90a4ae; margin-top: 6px; line-height: 1.5; }

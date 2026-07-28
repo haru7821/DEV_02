@@ -385,6 +385,26 @@
         r.placed >= r.target ? "info" : "error", 6000);
     });
 
+    // ── 레이어 패널: 동선·치수 표기의 표시 / 편집 / 삭제 ──
+    document.querySelectorAll("#layer-panel input[data-lv]").forEach((el) =>
+      el.addEventListener("change", () => {
+        FloorCanvas.setLayer(el.dataset.lv, { visible: el.checked });
+        // 숨긴 레이어는 편집도 의미가 없으므로 편집 체크를 비활성화한다
+        const ed = document.querySelector(`#layer-panel input[data-le="${el.dataset.lv}"]`);
+        if (ed) ed.disabled = !el.checked;
+      }));
+    document.querySelectorAll("#layer-panel input[data-le]").forEach((el) =>
+      el.addEventListener("change", () => {
+        FloorCanvas.setLayer(el.dataset.le, { locked: !el.checked });
+        if (el.checked) toast("이제 해당 표기를 클릭해 옮기거나 Del 키로 지울 수 있습니다.", "info");
+      }));
+    document.querySelectorAll("#layer-panel .layer-del").forEach((el) =>
+      el.addEventListener("click", () => {
+        const n = FloorCanvas.deleteLayer(el.dataset.ld);
+        toast(n ? `표기 ${n}개를 삭제했습니다. (Ctrl+Z로 되돌리기)` : "삭제할 표기가 없습니다.",
+          n ? "info" : "error");
+      }));
+
     on("btn-validate", "click", runValidation);
     on("btn-save-json", "click", saveJSON);
     on("btn-load-json", "click", () => $("json-file-input").click());

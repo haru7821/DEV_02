@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>인공신장실 도면 에디터</title>
-  <link rel="stylesheet" href="style.css?v=20260728f" />
+  <link rel="stylesheet" href="style.css?v=20260728g" />
   <!-- Fabric.js : 캔버스 객체 제어 (오프라인 환경 대비 로컬 번들) -->
   <script src="vendor/fabric.min.js"></script>
   <!-- jsPDF : PDF(가로모드) 출력 -->
@@ -142,6 +142,25 @@
         </div>
       </details>
 
+      <details class="tb-section" open>
+        <summary>레이어</summary>
+        <div class="tb-body" id="layer-panel">
+          <div class="layer-row" data-layer="flow">
+            <span class="layer-name">동선 표시</span>
+            <label title="도면에 표시"><input type="checkbox" data-lv="flow" checked /> 표시</label>
+            <label title="선택·이동·삭제 허용"><input type="checkbox" data-le="flow" /> 편집</label>
+            <button class="layer-del" data-ld="flow" title="이 레이어의 모든 표기를 삭제 (Ctrl+Z로 복구)">삭제</button>
+          </div>
+          <div class="layer-row" data-layer="dim">
+            <span class="layer-name">치수선</span>
+            <label title="도면에 표시"><input type="checkbox" data-lv="dim" checked /> 표시</label>
+            <label title="선택·이동·삭제 허용"><input type="checkbox" data-le="dim" /> 편집</label>
+            <button class="layer-del" data-ld="dim" title="이 레이어의 모든 치수선을 삭제 (Ctrl+Z로 복구)">삭제</button>
+          </div>
+          <p class="layer-hint">「편집」을 켜면 해당 표기를 클릭해 옮기거나 Del 키로 지울 수 있습니다.</p>
+        </div>
+      </details>
+
       <details class="tb-section">
         <summary>범례</summary>
         <div class="tb-body">
@@ -192,10 +211,10 @@
   <script src="vendor/three/OrbitControls.js"></script>
   <script src="vendor/three/GLTFExporter.js"></script>
   <script src="vendor/three/OBJExporter.js"></script>
-  <script src="js/assets.js?v=20260728f"></script>
-  <script src="js/canvas.js?v=20260728f"></script>
-  <script src="js/validation.js?v=20260728f"></script>
-  <script src="js/view3d.js?v=20260728f"></script>
-  <script src="js/app.js?v=20260728f"></script>
+  <script src="js/assets.js?v=20260728g"></script>
+  <script src="js/canvas.js?v=20260728g"></script>
+  <script src="js/validation.js?v=20260728g"></script>
+  <script src="js/view3d.js?v=20260728g"></script>
+  <script src="js/app.js?v=20260728g"></script>
 </body>
 </html>
