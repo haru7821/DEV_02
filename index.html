@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>인공신장실 도면 에디터</title>
-  <link rel="stylesheet" href="style.css?v=20260728h" />
+  <link rel="stylesheet" href="style.css?v=20260728i" />
   <!-- Fabric.js : 캔버스 객체 제어 (오프라인 환경 대비 로컬 번들) -->
   <script src="vendor/fabric.min.js"></script>
   <!-- jsPDF : PDF(가로모드) 출력 -->
@@ -143,6 +143,18 @@
       </details>
 
       <details class="tb-section" open>
+        <summary>도면 보관함</summary>
+        <div class="tb-body" id="vault-panel">
+          <div class="vault-save-row">
+            <input type="text" id="vault-name" placeholder="도면 이름 (예: 25병상 A안)" maxlength="40" />
+            <button id="btn-vault-save" class="tool-btn">보관함에 저장</button>
+          </div>
+          <div id="vault-list"></div>
+          <p class="layer-hint">보관함은 이 브라우저에만 저장됩니다. 다른 PC로 옮기려면 상단의 「JSON 저장」으로 파일을 내보내세요. 병상 대수·통로 폭·실 크기 등 Auto Modeling 설정도 함께 저장됩니다.</p>
+        </div>
+      </details>
+
+      <details class="tb-section" open>
         <summary>레이어</summary>
         <div class="tb-body" id="layer-panel">
           <div class="layer-row" data-layer="flow">
@@ -211,10 +223,10 @@
   <script src="vendor/three/OrbitControls.js"></script>
   <script src="vendor/three/GLTFExporter.js"></script>
   <script src="vendor/three/OBJExporter.js"></script>
-  <script src="js/assets.js?v=20260728h"></script>
-  <script src="js/canvas.js?v=20260728h"></script>
-  <script src="js/validation.js?v=20260728h"></script>
-  <script src="js/view3d.js?v=20260728h"></script>
-  <script src="js/app.js?v=20260728h"></script>
+  <script src="js/assets.js?v=20260728i"></script>
+  <script src="js/canvas.js?v=20260728i"></script>
+  <script src="js/validation.js?v=20260728i"></script>
+  <script src="js/view3d.js?v=20260728i"></script>
+  <script src="js/app.js?v=20260728i"></script>
 </body>
 </html>

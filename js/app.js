@@ -274,13 +274,138 @@
   }
 
   /* ───────── JSON 저장 / 열기 ───────── */
-  function saveJSON() {
+  /* ───────── 설정값 수집/복원 ─────────
+   * 도면 객체만 저장하면 다시 열었을 때 Auto Modeling 설정(병상 대수·통로 폭·
+   * 모듈 치수·실별 크기·시설 선택)이 사라진다. 설계 의도까지 함께 보존한다. */
+  const SETTING_IDS = ["room-width", "room-height", "wall-thickness", "console-depth",
+    "target-beds", "main-corridor", "passage-width", "module-width", "module-depth",
+    "station-seats", "snap-size"];
+
+  function collectSettings() {
+    const fields = {};
+    SETTING_IDS.forEach((id) => { if ($(id)) fields[id] = $(id).value; });
+    const rooms = {}, facilities = {};
+    document.querySelectorAll("#facility-checks input[data-size-w]").forEach((el) => {
+      const k = el.dataset.sizeW;
+      const h = document.querySelector(`#facility-checks input[data-size-h="${k}"]`);
+      rooms[k] = [el.value, h ? h.value : ""];
+    });
+    document.querySelectorAll("#facility-checks input[data-key]").forEach((el) => {
+      facilities[el.dataset.key] = el.checked;
+    });
+    return { fields, rooms, facilities };
+  }
+
+  function applySettings(st) {
+    if (!st) return;
+    Object.entries(st.fields ?? {}).forEach(([id, v]) => { if ($(id)) $(id).value = v; });
+    Object.entries(st.rooms ?? {}).forEach(([k, [w, h]]) => {
+      const we = document.querySelector(`#facility-checks input[data-size-w="${k}"]`);
+      const he = document.querySelector(`#facility-checks input[data-size-h="${k}"]`);
+      if (we && w) we.value = w;
+      if (he && h) he.value = h;
+    });
+    Object.entries(st.facilities ?? {}).forEach(([k, on]) => {
+      const el = document.querySelector(`#facility-checks input[data-key="${k}"]`);
+      if (el && !el.disabled) el.checked = on;
+    });
+    if ($("snap-size")) FloorCanvas.setSnap(+$("snap-size").value);
+  }
+
+  /* ───────── 도면 보관함 (브라우저 저장) ─────────
+   * 파일로 내보내지 않고 이름을 붙여 브라우저에 보관하고 목록에서 불러온다.
+   * 저장 위치는 localStorage이므로 같은 브라우저에서만 보입니다. */
+  const VAULT_KEY = "dialysis-plans-v1";
+
+  function vaultRead() {
+    try { return JSON.parse(localStorage.getItem(VAULT_KEY)) ?? []; }
+    catch { return []; }
+  }
+  function vaultWrite(list) {
+    try {
+      localStorage.setItem(VAULT_KEY, JSON.stringify(list));
+      return true;
+    } catch (e) {
+      toast("브라우저 저장 공간이 부족합니다. 오래된 도면을 삭제하거나 JSON 파일로 저장하세요.");
+      return false;
+    }
+  }
+
+  function planPayload() {
     const data = FloorCanvas.toJSON();
-    data.customAssets = customAssets; // 사용자 정의 시설 사양도 함께 저장
+    data.customAssets = customAssets;   // 사용자 정의 시설 사양
+    data.settings = collectSettings();  // Auto Modeling 설정값
+    return data;
+  }
+
+  function vaultSave() {
+    const name = ($("vault-name").value || "").trim()
+      || `도면 ${new Date().toLocaleString("ko-KR", { dateStyle: "short", timeStyle: "short" })}`;
+    const list = vaultRead();
+    const payload = { name, savedAt: Date.now(), data: planPayload() };
+    const i = list.findIndex((p) => p.name === name);
+    if (i >= 0) {
+      if (!confirm(`「${name}」 이름의 도면이 이미 있습니다. 덮어쓸까요?`)) return;
+      list[i] = payload;
+    } else {
+      list.unshift(payload);
+    }
+    if (!vaultWrite(list)) return;
+    $("vault-name").value = "";
+    renderVault();
+    toast(`「${name}」 도면을 보관함에 저장했습니다.`, "info");
+  }
+
+  function vaultLoad(name) {
+    const p = vaultRead().find((x) => x.name === name);
+    if (!p) return toast("보관함에서 도면을 찾을 수 없습니다.");
+    Object.entries(p.data.customAssets ?? {}).forEach(([k, s]) => registerCustomAsset(k, s));
+    applySettings(p.data.settings);
+    FloorCanvas.loadJSON(p.data, () => {
+      $("validation-report").textContent = "아직 검증하지 않았습니다.";
+      toast(`「${name}」 도면을 불러왔습니다.`, "info");
+    });
+  }
+
+  function vaultDelete(name) {
+    if (!confirm(`「${name}」 도면을 보관함에서 삭제할까요?`)) return;
+    vaultWrite(vaultRead().filter((x) => x.name !== name));
+    renderVault();
+    toast("보관함에서 삭제했습니다.", "info");
+  }
+
+  function renderVault() {
+    const wrap = $("vault-list");
+    if (!wrap) return;
+    const list = vaultRead();
+    if (!list.length) {
+      wrap.innerHTML = `<p class="layer-hint">저장된 도면이 없습니다. 이름을 입력하고 「보관함에 저장」을 누르세요.</p>`;
+      return;
+    }
+    wrap.innerHTML = "";
+    list.forEach((p) => {
+      const beds = (p.data.canvas?.objects ?? [])
+        .filter((o) => o.meta && o.meta.key === "bed_unit").length;
+      const row = document.createElement("div");
+      row.className = "vault-row";
+      row.innerHTML = `<span class="vault-info">
+          <b>${p.name}</b>
+          <small>병상 ${beds}대 · ${new Date(p.savedAt).toLocaleString("ko-KR", { dateStyle: "short", timeStyle: "short" })}</small>
+        </span>
+        <button class="vault-open">불러오기</button>
+        <button class="vault-del layer-del">삭제</button>`;
+      row.querySelector(".vault-open").addEventListener("click", () => vaultLoad(p.name));
+      row.querySelector(".vault-del").addEventListener("click", () => vaultDelete(p.name));
+      wrap.appendChild(row);
+    });
+  }
+
+  function saveJSON() {
+    const data = planPayload();
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "dialysis-room-plan.json";
+    a.download = `인공신장실_도면_${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
   }
@@ -291,6 +416,7 @@
       try {
         const data = JSON.parse(reader.result);
         Object.entries(data.customAssets ?? {}).forEach(([k, s]) => registerCustomAsset(k, s));
+        applySettings(data.settings); // 저장 시점의 Auto Modeling 설정도 복원
         FloorCanvas.loadJSON(data, () => toast("도면을 불러왔습니다.", "info"));
       } catch (e) {
         toast("JSON 파일을 읽을 수 없습니다: " + e.message);
@@ -411,6 +537,11 @@
         toast(n ? `표기 ${n}개를 삭제했습니다. (Ctrl+Z로 되돌리기)` : "삭제할 표기가 없습니다.",
           n ? "info" : "error");
       }));
+
+    // ── 도면 보관함 ──
+    on("btn-vault-save", "click", vaultSave);
+    on("vault-name", "keydown", (e) => { if (e.key === "Enter") vaultSave(); });
+    renderVault();
 
     on("btn-validate", "click", runValidation);
     on("btn-save-json", "click", saveJSON);
