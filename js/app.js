@@ -432,14 +432,6 @@
     });
 
     // 정렬 / 등간격 배치
-    const ALIGN_BUTTONS = {
-      "btn-align-left": "left", "btn-align-hcenter": "hcenter", "btn-align-right": "right",
-      "btn-align-top": "top", "btn-align-vcenter": "vcenter", "btn-align-bottom": "bottom",
-    };
-    Object.entries(ALIGN_BUTTONS).forEach(([id, mode]) => {
-      $(id).addEventListener("click", () =>
-        FloorCanvas.alignSelection(mode) || toast("Shift 클릭으로 두 개 이상 객체를 선택하세요."));
-    });
     on("btn-dist-h", "click", () =>
       FloorCanvas.distributeSelection("h") || toast("세 개 이상 객체를 선택하세요."));
     on("btn-dist-v", "click", () =>

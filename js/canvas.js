@@ -1496,24 +1496,6 @@ const FloorCanvas = (() => {
     return true;
   }
 
-  /** mode: left | hcenter | right | top | vcenter | bottom */
-  function alignSelection(mode) {
-    return withSelection(2, (items) => {
-      const L = Math.min(...items.map((i) => i.r.left));
-      const R = Math.max(...items.map((i) => i.r.left + i.r.width));
-      const T = Math.min(...items.map((i) => i.r.top));
-      const B = Math.max(...items.map((i) => i.r.top + i.r.height));
-      items.forEach(({ o, r }) => {
-        if (mode === "left") o.set("left", o.left + (L - r.left));
-        else if (mode === "right") o.set("left", o.left + (R - r.width - r.left));
-        else if (mode === "hcenter") o.set("left", o.left + ((L + R - r.width) / 2 - r.left));
-        else if (mode === "top") o.set("top", o.top + (T - r.top));
-        else if (mode === "bottom") o.set("top", o.top + (B - r.height - r.top));
-        else if (mode === "vcenter") o.set("top", o.top + ((T + B - r.height) / 2 - r.top));
-      });
-    });
-  }
-
   /** axis: "h"(가로 등간격) | "v"(세로 등간격) — 3개 이상 선택 시 */
   function distributeSelection(axis) {
     return withSelection(3, (items) => {
@@ -1670,7 +1652,7 @@ const FloorCanvas = (() => {
     setWallThickness, setConsoleDepth, setModuleWidth, setStationSeats, addBedUnit,
     renumberBeds, renameSelected, setBlueprintMode,
     undo, redo, copySelection, pasteClipboard, duplicateSelection,
-    alignSelection, distributeSelection, bringSelectionToFront, sendSelectionToBack,
+    distributeSelection, bringSelectionToFront, sendSelectionToBack,
     flipSelection, toggleLockSelection, zoomBy, exportSVG,
     setSnap: (s) => { snapSize = s; },
     getRoom: () => room,
