@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>인공신장실 도면 에디터</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=20260728" />
   <!-- Fabric.js : 캔버스 객체 제어 (오프라인 환경 대비 로컬 번들) -->
   <script src="vendor/fabric.min.js"></script>
   <!-- jsPDF : PDF(가로모드) 출력 -->
@@ -183,9 +183,11 @@
   <div id="toast" hidden></div>
 
   <!-- 스크립트 (의존 순서 주의) -->
-  <script src="js/assets.js"></script>
-  <script src="js/canvas.js"></script>
-  <script src="js/validation.js"></script>
-  <script src="js/app.js"></script>
+  <!-- ?v= : 파일 갱신 시 브라우저가 옛 캐시를 쓰지 않도록 하는 버전 태그
+       (HTML만 새로 받고 JS는 캐시된 옛 파일을 쓰면 버튼이 동작하지 않을 수 있음) -->
+  <script src="js/assets.js?v=20260728"></script>
+  <script src="js/canvas.js?v=20260728"></script>
+  <script src="js/validation.js?v=20260728"></script>
+  <script src="js/app.js?v=20260728"></script>
 </body>
 </html>

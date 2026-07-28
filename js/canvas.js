@@ -786,6 +786,11 @@ const FloorCanvas = (() => {
       return addEquipment(k, { left: x + px, top: y + dy, silent: true, ...opts });
     };
     switch (key) {
+      case "nurse_room": // 간호사실: 회의 테이블 + 락커 2열 (탈의·휴게)
+        put("counter_desk", 15, 20, { width: Math.min(w - 40, 200) });
+        put("cabinet", 15, h - 57);
+        put("cabinet", 145, h - 57);
+        break;
       case "nurse_station": { // 2인 데스크 × (좌석/2), 개방면(상단)을 향해 배치
         const desks = Math.min(4, Math.ceil(stationSeats / 2)); // 최대 8석 = 4유닛
         for (let i = 0; i < desks; i++) {
@@ -924,15 +929,22 @@ const FloorCanvas = (() => {
     // ── 시설 분류: 실별 특성에 따라 내부(환자 접근)/외부(후방 지원) 배치 ──
     // 외부(back-of-house) 실: 소음·오염·설비 계열 → 측면 기술 밴드(외벽 쪽)
     // 내부(patient-facing) 실: 환자가 드나드는 실 → 하단 환자 밴드(출입구 쪽)
+    // 참고 도면처럼 직원 지원실(간호사실·상담실·과장실)도 후방 블록에 둔다 —
+    // 환자 프런트 밴드는 환자가 쓰는 실만 남겨 동선이 섞이지 않는다
     const TECH = ["water_treatment", "storage", "linen_room", "laundry_room",
-                  "waste_room", "clean_room", "core"];
+                  "waste_room", "clean_room", "core",
+                  "nurse_room", "consult_room", "office_room"];
     const techSide = pick(["left", "right"]); // 변형 포인트 ①: 서비스 존 방향
     const hasWT = chosen.includes("water_treatment");
     const hasIso = chosen.includes("isolation_room");
     // 참고 도면 분석 ①: 외부 밴드는 위(청결: 코어·창고·린넨)에서
     // 아래(오염: 기구세척·세탁·오물) 순으로 적층 — 오염 계열은 소음원인
     // 정수실과 함께 하단 코너에 모여 청결 동선과 분리되고 외부 반출이 쉽다.
-    const TECH_ORDER = { core: 0, storage: 1, linen_room: 2, clean_room: 3, laundry_room: 4, waste_room: 5 };
+    // 위(직원 지원·청결) → 아래(오염·설비) 순. 오염 계열이 정수실과 하단 코너에 모인다
+    const TECH_ORDER = {
+      office_room: -3, consult_room: -2, nurse_room: -1,
+      core: 0, storage: 1, linen_room: 2, clean_room: 3, laundry_room: 4, waste_room: 5,
+    };
     const techKeys = chosen.filter((k) => TECH.includes(k) && k !== "water_treatment")
       .sort((a, b) => (TECH_ORDER[a] ?? 9) - (TECH_ORDER[b] ?? 9));
     // 참고 도면 분석 ②: N.S는 병상 필드 안 'U자 아일랜드'로 독립 배치(별도 처리),
@@ -941,6 +953,7 @@ const FloorCanvas = (() => {
     // 동선 쪽 끝(처치→조제) 순 — 환자 동선(출입구→대기→탈의→병상)과
     // 직원 동선(N.S↔조제/처치)이 교차하지 않는다.
     const hasNS = chosen.includes("nurse_station");
+    // 환자 프런트(화장실·탈의·대기) → 동선 쪽 끝(간호처치실·조제실, N.S와 같은 복도)
     const PATIENT_ORDER = { toilet: 3, changing_room: 4, waiting_area: 5, treatment_room: 6, pharmacy_room: 7 };
     const patientKeys = shuffle(chosen.filter((k) =>
       !TECH.includes(k) && !["isolation_room", "water_treatment", "nurse_station"].includes(k)))
@@ -955,61 +968,104 @@ const FloorCanvas = (() => {
     const maxPatH0 = Math.max(250, ...patientKeys.map((key) => equipmentData[key].height));
     let kScale = baseArea > 0 ? Math.sqrt((W * H * 0.5) / baseArea) : 1;
     kScale = Math.max(1, Math.min(kScale, (W * 0.35) / maxTechW0, (H * 0.4) / maxPatH0));
+    // 확대 배율 상한: 선택한 실이 모두 들어가도록 제한한다
+    // (세로) 후방 밴드 실 높이 합 + 환자 밴드 깊이 ≤ 병실 높이
+    const sumTechH = [...techKeys, ...(hasWT ? ["water_treatment"] : [])]
+      .reduce((s, key) => s + equipmentData[key].height, 0);
+    if (sumTechH + maxPatH0 > 0) {
+      const avail = H - M * 2 - 10 * (techKeys.length + 2);
+      kScale = Math.max(1, Math.min(kScale, avail / (sumTechH + maxPatH0)));
+    }
+    // (가로) 환자 밴드 실 폭 합 + 후방 밴드 폭 + 주 동선 ≤ 병실 폭
+    const sumPatW = patientKeys.reduce((s, key) => s + equipmentData[key].width, 0);
+    if (sumPatW + maxTechW0 > 0) {
+      const availW = W - M * 2 - 10 * (patientKeys.length + 1) - Math.max(120, Math.round(opts.passage ?? 150));
+      kScale = Math.max(1, Math.min(kScale, availW / (sumPatW + maxTechW0)));
+    }
     const sdim = (v) => Math.round((v * kScale) / 10) * 10; // 10cm 단위로 스케일
 
     // ── 기술 밴드: 측면 벽 세로 적층 (가로 폭 통일) ──
     // 조건 ②: 정수장치는 소음원이므로 병상 밀집 구역(상단 열)에서 가장 먼
     // 밴드 최하단 코너에 배치한다.
-    const techBandW = maxTechW0 ? sdim(maxTechW0) : 0;
+    const colW = maxTechW0 ? sdim(maxTechW0) : 0;
     const patientBandH = sdim(maxPatH0);
+    const TECH_AISLE = 130; // 후방 밴드 두 열 사이 내부 복도(1300mm)
+    // 후방 실 높이 합이 한 열에 안 들어가면 2열 구성 (참고 도면의 후방 블록)
+    const bandAvailH = H - patientBandH - M * 2 - 10;
+    const techNeedH = [...techKeys, ...(hasWT ? ["water_treatment"] : [])]
+      .reduce((s, key) => s + sdim(equipmentData[key].height) + 10, 0);
+    const fieldNeedW = 130 + Math.max(120, Math.round(opts.passage ?? 150)) + moduleWidth * 3;
+    const techCols = (techNeedH > bandAvailH && colW &&
+                      W - (colW * 2 + TECH_AISLE) - M * 2 >= fieldNeedW) ? 2 : 1;
+    const techBandW = colW ? colW * techCols + TECH_AISLE * (techCols - 1) : 0;
     {
       const tx = techSide === "left" ? M : W - techBandW - M;
+      // 열(column) 좌표: col 0 = 외벽 쪽, col 1 = 안쪽. 두 열 사이는 내부 복도.
+      const colX = (c) => techSide === "left"
+        ? tx + c * (colW + TECH_AISLE)
+        : tx + techBandW - colW - c * (colW + TECH_AISLE);
       // 문 앵커 보정: angle 90은 앵커 기준 왼쪽·아래로, angle 270은 오른쪽·위로
-      // 그려진다(fabric 실측). 스윙 범위가 자기 실 내부(ty+40~130)에 머물도록
-      // 90°는 (벽+14, ty+40), 270°는 (벽-7, ty+130)에 앵커를 둔다.
-      const innerDoor = (ty) => techSide === "left"
-        ? addDoor("swing_door", { left: tx + techBandW + 14, top: ty + 40, angle: 90, silent: true })
-        : addDoor("swing_door", { left: tx - 7, top: ty + 130, angle: 270, silent: true });
+      // 그려진다(fabric 실측). 스윙 범위가 자기 실 내부에 머물도록 보정한다.
+      // 각 실의 문은 자기 열에서 복도(또는 병상 필드) 쪽 변에 단다.
+      const innerDoor = (c, ty) => techSide === "left"
+        ? addDoor("swing_door", { left: colX(c) + colW + 14, top: ty + 40, angle: 90, silent: true })
+        : addDoor("swing_door", { left: colX(c) - 7, top: ty + 130, angle: 270, silent: true });
       const outerDoor = (ty) => techSide === "left"
-        ? addDoor("swing_door", { left: tx - 7, top: ty + 130, angle: 270, silent: true })
-        : addDoor("swing_door", { left: tx + techBandW + 7, top: ty + 40, angle: 90, silent: true });
+        ? addDoor("swing_door", { left: colX(0) - 7, top: ty + 130, angle: 270, silent: true })
+        : addDoor("swing_door", { left: colX(0) + colW + 7, top: ty + 40, angle: 90, silent: true });
       // 문 개폐 구역(오브젝트 배치 금지): 안쪽 문/바깥쪽 문 스윙 범위
-      const innerDoorZone = (ty) => techSide === "left"
-        ? { x0: tx + techBandW - 95, x1: tx + techBandW + 5, y0: ty + 30, y1: ty + 140 }
-        : { x0: tx - 5, x1: tx + 100, y0: ty + 30, y1: ty + 140 };
+      const innerDoorZone = (c, ty) => techSide === "left"
+        ? { x0: colX(c) + colW - 95, x1: colX(c) + colW + 5, y0: ty + 30, y1: ty + 140 }
+        : { x0: colX(c) - 5, x1: colX(c) + 100, y0: ty + 30, y1: ty + 140 };
       const outerDoorZone = (ty) => techSide === "left"
-        ? { x0: tx - 5, x1: tx + 100, y0: ty + 30, y1: ty + 140 }
-        : { x0: tx + techBandW - 95, x1: tx + techBandW + 5, y0: ty + 30, y1: ty + 140 };
+        ? { x0: colX(0) - 5, x1: colX(0) + 100, y0: ty + 30, y1: ty + 140 }
+        : { x0: colX(0) + colW - 95, x1: colX(0) + colW + 5, y0: ty + 30, y1: ty + 140 };
 
-      // 정수실: 밴드 맨 아래(환자에게서 가장 먼 코너)에 먼저 확보
+      // 정수실: 외벽 열(col 0) 맨 아래 — 환자에게서 가장 먼 코너
       let wtTop = H - patientBandH - M - 10;
       if (hasWT) {
         const wtH = sdim(equipmentData.water_treatment.height);
         wtTop = H - patientBandH - M - 10 - wtH;
-        addEquipment("water_treatment", { left: tx, top: wtTop, width: techBandW, height: wtH, silent: true });
-        innerDoor(wtTop);
-        populateRoom("water_treatment", tx, wtTop, techBandW, wtH, [innerDoorZone(wtTop)]);
+        addEquipment("water_treatment", { left: colX(0), top: wtTop, width: colW, height: wtH, silent: true });
+        innerDoor(0, wtTop);
+        populateRoom("water_treatment", colX(0), wtTop, colW, wtH, [innerDoorZone(0, wtTop)]);
       }
-      // 나머지 외부 실은 정수실 바로 위에서부터 아래→위로 적층:
-      // 오염 계열(오물·세탁·세척)이 정수실과 하단 코너에 밀착 클러스터를
-      // 이루고, 청결 계열(린넨·창고·코어)이 위쪽에 놓인다 (도면 분석 ①)
-      let ty = wtTop - 10;
-      [...techKeys].reverse().forEach((key) => { // waste → … → core 순으로 아래부터
+      // 나머지 후방 실은 정수실 위에서부터 아래→위로 적층하고,
+      // 열이 차면 안쪽 열(col 1)로 넘어간다 — 두 열 사이는 내부 복도.
+      // 오염 계열(오물·세탁·세척)이 정수실과 하단 코너에 모이고,
+      // 청결·직원 계열(린넨·창고·코어·간호사실·상담·과장)이 위로 간다.
+      const colTops = [wtTop - 10, H - patientBandH - M - 10];
+      [...techKeys].reverse().forEach((key) => { // waste → … → office 순으로 아래부터
         const h = sdim(equipmentData[key].height);
-        if (ty - h < M) return; // 위 공간 부족 시 청결 계열부터 생략
-        ty -= h;
-        addEquipment(key, { left: tx, top: ty, width: techBandW, height: h, silent: true });
-        innerDoor(ty);
+        let c = 0;
+        if (colTops[0] - h < M) c = 1;           // 외벽 열이 차면 안쪽 열로
+        if (colTops[c] - h < M) return;          // 두 열 모두 부족하면 생략
+        colTops[c] -= h;
+        const ty2 = colTops[c];
+        addEquipment(key, { left: colX(c), top: ty2, width: colW, height: h, silent: true });
+        innerDoor(c, ty2);
         // 조건 ⑥: 오물처리실은 내부(복도) + 외부(외벽) 양방향 출구
-        const zones = [innerDoorZone(ty)];
-        if (key === "waste_room") {
-          const oy = ty + Math.min(120, h - 130);
+        const zones = [innerDoorZone(c, ty2)];
+        if (key === "waste_room" && c === 0) {
+          const oy = ty2 + Math.min(120, h - 130);
           outerDoor(oy);
           zones.push(outerDoorZone(oy));
         }
-        populateRoom(key, tx, ty, techBandW, h, zones); // 실별 기본 오브젝트 (문 앞 회피)
-        ty -= 10;
+        populateRoom(key, colX(c), ty2, colW, h, zones); // 실별 기본 오브젝트 (문 앞 회피)
+        colTops[c] -= 10;
       });
+      // 두 열 사이 내부 복도 표시 (후방 지원 동선)
+      if (techCols > 1) {
+        const zx = techSide === "left" ? tx + colW + 2 : tx + colW + 2;
+        const zone = new fabric.Rect({
+          left: zx, top: M + 10, width: TECH_AISLE - 4, height: H - patientBandH - M * 2 - 10,
+          fill: "rgba(158,158,158,0.10)", stroke: "#9E9E9E",
+          strokeWidth: 1.5, strokeDashArray: [12, 10],
+          selectable: false, evented: false,
+        });
+        zone.meta = { key: "annotation", label: "후방 복도" };
+        canvas.add(zone);
+      }
     }
 
     // ── 주 출입구 + 주 동선 통로: 병상 필드의 먼쪽 가장자리 ──

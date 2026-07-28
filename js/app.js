@@ -4,6 +4,25 @@
 (() => {
   const $ = (id) => document.getElementById(id);
 
+  /**
+   * 안전한 이벤트 등록.
+   * 요소가 없어도 예외를 던지지 않는다 — HTML/JS 캐시가 어긋나 요소 하나가
+   * 사라져도 뒤이어 등록되는 다른 버튼(Auto Modeling 등)이 죽지 않도록 한다.
+   */
+  function on(id, type, handler) {
+    const el = $(id);
+    if (!el) { console.warn(`[UI] 요소 없음: #${id} — 리스너를 건너뜁니다.`); return null; }
+    el.addEventListener(type, (e) => {
+      try {
+        handler(e);
+      } catch (err) {
+        console.error(`[UI] #${id} 처리 중 오류`, err);
+        toast(`동작 중 오류가 발생했습니다: ${err.message}`);
+      }
+    });
+    return el;
+  }
+
   /* 단위 변환: 내부 모델은 1px = 1cm, 화면 표기는 모두 mm */
   const toMM = (cm) => Math.round(cm * 10);
   const toCM = (mm) => mm / 10;
@@ -276,7 +295,7 @@
     bindPropertyPanel(FloorCanvas.getCanvas());
 
     // 상단 네비게이션
-    $("btn-new-room").addEventListener("click", () => {
+    on("btn-new-room", "click", () => {
       const w = toCM(+$("room-width").value), h = toCM(+$("room-height").value); // 입력은 mm
       if (w < 300 || h < 300) return toast("병실 크기는 최소 3,000mm × 3,000mm 이상이어야 합니다.");
       FloorCanvas.setWallThickness(toCM(+$("wall-thickness").value));
@@ -285,16 +304,16 @@
       $("validation-report").textContent = "아직 검증하지 않았습니다.";
     });
     // 콘솔 두께 입력: 이후 추가/자동 배치되는 배관 콘솔부터 즉시 적용
-    $("console-depth").addEventListener("change", (e) =>
+    on("console-depth", "change", (e) =>
       FloorCanvas.setConsoleDepth(toCM(+e.target.value)));
-    $("btn-load-image").addEventListener("click", () => $("image-file-input").click());
-    $("image-file-input").addEventListener("change", (e) => {
+    on("btn-load-image", "click", () => $("image-file-input").click());
+    on("image-file-input", "change", (e) => {
       if (e.target.files[0]) loadImageFile(e.target.files[0]);
       e.target.value = "";
     });
-    $("snap-size").addEventListener("change", (e) => FloorCanvas.setSnap(+e.target.value));
+    on("snap-size", "change", (e) => FloorCanvas.setSnap(+e.target.value));
     // Auto Modeling: 선택 시설 + 목표 병상 대수로 매번 다른 랜덤 구성 생성
-    $("btn-auto-model").addEventListener("click", () => {
+    on("btn-auto-model", "click", () => {
       FloorCanvas.setWallThickness(toCM(+$("wall-thickness").value));
       FloorCanvas.setConsoleDepth(toCM(+$("console-depth").value));
       if (!FloorCanvas.getCanvas().backgroundImage) {
@@ -319,18 +338,18 @@
         r.placed >= r.target ? "info" : "error", 6000);
     });
 
-    $("btn-validate").addEventListener("click", runValidation);
-    $("btn-save-json").addEventListener("click", saveJSON);
-    $("btn-load-json").addEventListener("click", () => $("json-file-input").click());
-    $("json-file-input").addEventListener("change", (e) => {
+    on("btn-validate", "click", runValidation);
+    on("btn-save-json", "click", saveJSON);
+    on("btn-load-json", "click", () => $("json-file-input").click());
+    on("json-file-input", "change", (e) => {
       if (e.target.files[0]) loadJSONFile(e.target.files[0]);
       e.target.value = "";
     });
-    $("btn-export-pdf").addEventListener("click", exportPDF);
+    on("btn-export-pdf", "click", exportPDF);
 
     // 흑백 도면(청사진) 모드 토글
     let blueprintOn = false;
-    $("btn-blueprint").addEventListener("click", (e) => {
+    on("btn-blueprint", "click", (e) => {
       blueprintOn = FloorCanvas.setBlueprintMode(!blueprintOn);
       e.target.classList.toggle("active", blueprintOn);
       toast(blueprintOn ? "도면 모드: 흑백 건축 도면 스타일로 표시합니다. (배관 색상은 유지)"
@@ -338,9 +357,9 @@
     });
 
     // 좌측 도구
-    $("btn-group").addEventListener("click", () =>
+    on("btn-group", "click", () =>
       FloorCanvas.groupSelection() || toast("먼저 Shift 클릭으로 두 개 이상 객체를 선택하세요."));
-    $("btn-ungroup").addEventListener("click", () =>
+    on("btn-ungroup", "click", () =>
       FloorCanvas.ungroupSelection() || toast("해제할 그룹을 선택하세요."));
 
     // 배관 그리기 버튼 (급수/배수) — 켜진 버튼만 종료 안내 문구로 전환
@@ -361,13 +380,13 @@
       });
     });
 
-    $("btn-renumber").addEventListener("click", () => {
+    on("btn-renumber", "click", () => {
       const n = FloorCanvas.renumberBeds();
       if (!n) return toast("재정렬할 병상이 없습니다.");
       toast(`병상 ${n}개의 번호를 HD1부터 다시 부여했습니다.`, "info");
     });
-    $("btn-delete").addEventListener("click", FloorCanvas.deleteSelection);
-    $("btn-add-custom").addEventListener("click", addCustomAsset);
+    on("btn-delete", "click", FloorCanvas.deleteSelection);
+    on("btn-add-custom", "click", addCustomAsset);
 
     // PNG / SVG 내보내기
     const downloadBlob = (blob, filename) => {
@@ -377,7 +396,7 @@
       a.click();
       URL.revokeObjectURL(a.href);
     };
-    $("btn-export-png").addEventListener("click", () => {
+    on("btn-export-png", "click", () => {
       const url = FloorCanvas.exportImage("png");
       const a = document.createElement("a");
       a.href = url;
@@ -385,28 +404,28 @@
       a.click();
       toast("PNG 이미지가 다운로드되었습니다.", "info");
     });
-    $("btn-export-svg").addEventListener("click", () => {
+    on("btn-export-svg", "click", () => {
       downloadBlob(new Blob([FloorCanvas.exportSVG()], { type: "image/svg+xml" }),
         "dialysis-room-floorplan.svg");
       toast("SVG 벡터 파일이 다운로드되었습니다.", "info");
     });
 
     // 편집 도구 (실행취소·복제·반전·순서·잠금)
-    $("btn-undo").addEventListener("click", () =>
+    on("btn-undo", "click", () =>
       FloorCanvas.undo() || toast("더 이상 취소할 작업이 없습니다."));
-    $("btn-redo").addEventListener("click", () =>
+    on("btn-redo", "click", () =>
       FloorCanvas.redo() || toast("다시 실행할 작업이 없습니다."));
-    $("btn-duplicate").addEventListener("click", () =>
+    on("btn-duplicate", "click", () =>
       FloorCanvas.duplicateSelection() || toast("복제할 객체를 먼저 선택하세요."));
-    $("btn-flip-h").addEventListener("click", () =>
+    on("btn-flip-h", "click", () =>
       FloorCanvas.flipSelection("h") || toast("반전할 객체를 먼저 선택하세요."));
-    $("btn-flip-v").addEventListener("click", () =>
+    on("btn-flip-v", "click", () =>
       FloorCanvas.flipSelection("v") || toast("반전할 객체를 먼저 선택하세요."));
-    $("btn-front").addEventListener("click", () =>
+    on("btn-front", "click", () =>
       FloorCanvas.bringSelectionToFront() || toast("객체를 먼저 선택하세요."));
-    $("btn-back").addEventListener("click", () =>
+    on("btn-back", "click", () =>
       FloorCanvas.sendSelectionToBack() || toast("객체를 먼저 선택하세요."));
-    $("btn-lock").addEventListener("click", () => {
+    on("btn-lock", "click", () => {
       const locked = FloorCanvas.toggleLockSelection();
       if (locked === null) return toast("잠글 객체를 먼저 선택하세요.");
       toast(locked ? "선택 객체를 잠갔습니다. (이동/크기/회전 불가)" : "잠금을 해제했습니다.", "info");
@@ -421,18 +440,18 @@
       $(id).addEventListener("click", () =>
         FloorCanvas.alignSelection(mode) || toast("Shift 클릭으로 두 개 이상 객체를 선택하세요."));
     });
-    $("btn-dist-h").addEventListener("click", () =>
+    on("btn-dist-h", "click", () =>
       FloorCanvas.distributeSelection("h") || toast("세 개 이상 객체를 선택하세요."));
-    $("btn-dist-v").addEventListener("click", () =>
+    on("btn-dist-v", "click", () =>
       FloorCanvas.distributeSelection("v") || toast("세 개 이상 객체를 선택하세요."));
 
     // 줌 컨트롤
     const updateZoomLabel = () => {
       $("zoom-label").textContent = Math.round(FloorCanvas.getCanvas().getZoom() * 100) + "%";
     };
-    $("btn-zoom-in").addEventListener("click", () => { FloorCanvas.zoomBy(1.2); });
-    $("btn-zoom-out").addEventListener("click", () => { FloorCanvas.zoomBy(1 / 1.2); });
-    $("btn-zoom-fit").addEventListener("click", () => { FloorCanvas.fitToScreen(); });
+    on("btn-zoom-in", "click", () => { FloorCanvas.zoomBy(1.2); });
+    on("btn-zoom-out", "click", () => { FloorCanvas.zoomBy(1 / 1.2); });
+    on("btn-zoom-fit", "click", () => { FloorCanvas.fitToScreen(); });
     FloorCanvas.getCanvas().on("after:render", updateZoomLabel);
     updateZoomLabel();
 

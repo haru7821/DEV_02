@@ -72,10 +72,20 @@ const equipmentData = {
     color: "#9C27B0",
     type: "infrastructure",
   },
+  // ── Nurse Station(N.S)와 간호사실은 서로 다른 공간 ──
+  // N.S : 환자·장비를 감시하고 주요 업무를 보는 개방형 카운터 (U자 아일랜드)
   nurse_station: {
-    label: "간호사실",
+    label: "Nurse Station (N.S)",
+    shortLabel: "N.S",
     width: 400, height: 250,   // 개방형 카운터 스테이션 (참고 도면 3.2~4.0m 폭)
     color: "#FF9800",
+    type: "room",
+  },
+  // 간호사실 : 간호사 탈의·휴게·회의용 별도 실 (참고 도면의 '간호사 탈의실(휴게실)')
+  nurse_room: {
+    label: "간호사실 (탈의·휴게)",
+    width: 350, height: 300,
+    color: "#FFCC80",
     type: "room",
   },
   changing_room: {
