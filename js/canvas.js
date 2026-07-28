@@ -1071,8 +1071,32 @@ const FloorCanvas = (() => {
     const shrink = opts._shrink ?? 1;
     const userSize = (k) => (opts.roomSizes && opts.roomSizes[k]) || null;
     const q10 = (v) => Math.max(100, Math.round(v / 10) * 10);
-    const bW = (k) => q10((userSize(k)?.w ?? equipmentData[k].width) * shrink);
-    const bH = (k) => q10((userSize(k)?.h ?? equipmentData[k].height) * shrink);
+
+    // ── 병상 대수 연동 실 크기 ──
+    // 소모품·린넨·오물량과 환자 회전율은 병상 수에 비례하므로, 관련 실은
+    // 목표 대수에 따라 커지고 작아진다. 계수는 '병상 수 민감도'(0~1):
+    // 1.0 = 병상 수에 그대로 비례, 0 = 대수와 무관한 고정 규격(화장실·코어 등).
+    const BED_SENSITIVITY = {
+      storage: 1, linen_room: 1, laundry_room: 1, waste_room: 1, clean_room: 1,
+      waiting_area: 1, changing_room: 0.7, treatment_room: 0.7, pharmacy_room: 0.5,
+      nurse_room: 0.6, water_treatment: 0.8, repair_room: 0.5, training_room: 0.4,
+      toilet: 0.3, consult_room: 0.2, office_room: 0.2, core: 0, isolation_room: 0,
+    };
+    // 기준 20병상 대비 √비례 (면적이 대수에 비례하도록 한 변은 제곱근)
+    const bedFactor = Math.min(1.8, Math.max(0.65, Math.sqrt(target / 20)));
+    const bedScale = (k) => 1 + (bedFactor - 1) * (BED_SENSITIVITY[k] ?? 0.5);
+    /** 실별 변형 계수 (시드 난수) — 같은 대수라도 실 크기 구성이 매번 달라진다 */
+    const jitter = {};
+    Object.keys(equipmentData).forEach((k) => { jitter[k] = 0.9 + rng() * 0.25; });
+    /** 최종 기본 치수 = 스펙 × 대수 연동 × 변형 × 대수우선 축소 (지정 실은 지정값 고정) */
+    const bDim = (k, dim) => {
+      const u = userSize(k);
+      if (u) return q10(u[dim] * shrink);
+      return q10(equipmentData[k][dim === "w" ? "width" : "height"]
+        * bedScale(k) * jitter[k] * shrink);
+    };
+    const bW = (k) => bDim(k, "w");
+    const bH = (k) => bDim(k, "h");
 
     // ── 시설 분류: 실별 특성에 따라 내부(환자 접근)/외부(후방 지원) 배치 ──
     // 외부(back-of-house) 실: 소음·오염·설비 계열 → 측면 기술 밴드(외벽 쪽)
@@ -1082,7 +1106,12 @@ const FloorCanvas = (() => {
     const TECH = ["water_treatment", "storage", "linen_room", "laundry_room",
                   "waste_room", "clean_room", "core", "repair_room", "training_room",
                   "nurse_room", "consult_room", "office_room"];
-    const techSide = pick(["left", "right"]); // 변형 포인트 ①: 서비스 존 방향
+    // ── 배치 변형 축 (시드 난수) ──
+    // 서로 독립인 축(골격 8가지) × 병상 대수 연동 실 크기 × 실별 크기 변형으로
+    // 매번 다른 평면이 나온다. 어느 조합이든 규격·동선 규칙은 그대로 지켜진다.
+    const techSide = pick(["left", "right"]);        // ① 서비스 존(후방 밴드) 방향
+    const corridorSide = pick(["far", "near"]);      // ② 주 동선을 후방 밴드 반대편 | 같은 편
+    const wantTwoCols = rng() < 0.5;                 // ③ 후방 밴드 2열 구성 선호
     const hasWT = chosen.includes("water_treatment");
     const hasIso = chosen.includes("isolation_room");
     // 후방 밴드 적층 순서 (값이 작을수록 위 = 환자 출입구에서 먼 쪽).
@@ -1154,15 +1183,43 @@ const FloorCanvas = (() => {
     const userPatH = Math.max(0, ...patientKeys.filter((k) => userSize(k)).map(bH));
     const autoPatH = Math.max(Math.round(250 * Math.max(shrink, 0.7) / 10) * 10,
                               ...patientKeys.filter((k) => !userSize(k)).map(bH));
-    const patientBandH = Math.max(sdim(autoPatH), userPatH);
+    let patientBandH = Math.max(sdim(autoPatH), userPatH);
+    /** 주어진 높이에 양면 밴드 n조(+단면 행)를 가장 빈틈없이 넣는 구성을 찾는다 */
+    const planBands = (avail) => {
+      const bH2 = moduleDepth * 2 + consoleDepth + 6;   // 양면 밴드 깊이
+      const sH2 = consoleDepth + 6 + moduleDepth;       // 단면 행 깊이
+      let best = { nb: 0, single: false, gaps: 0, waste: Math.max(0, avail) };
+      for (let nb = 0; nb * bH2 <= avail; nb++) {
+        [false, true].forEach((single) => {
+          const rows = nb + (single ? 1 : 0);
+          if (!rows) return;
+          const used = nb * bH2 + (single ? sH2 : 0);
+          const gaps = rows - 1;
+          if (used + gaps * aisle > avail) return;
+          const waste = avail - used - gaps * aisle;
+          if (waste < best.waste) best = { nb, single, gaps, waste };
+        });
+      }
+      return best;
+    };
+    // ── 죽은 공간 되돌리기: 병상 밴드가 쓰고 남을 높이를 환자 밴드가 흡수한다 ──
+    // 통로만 무한정 넓히면 '넓은 빈 바닥'이 되므로, 통로 증가분은 요청 폭의 60%로
+    // 제한하고 나머지는 실 면적(환자 밴드 깊이)으로 되돌린다.
+    {
+      const byEst = Math.max(M + 20, MEDICAL_RULES.FOOT_WALL_CLEARANCE_CM);
+      const p = planBands(H - patientBandH - M - 130 - byEst);
+      const spare = Math.max(0, p.waste - p.gaps * Math.round(aisle * 0.6));
+      patientBandH += Math.floor(spare / 10) * 10;
+    }
     const TECH_AISLE = 130; // 후방 밴드 두 열 사이 내부 복도(1300mm)
     // 후방 실 높이 합이 한 열에 안 들어가면 2열 구성 (참고 도면의 후방 블록)
     const bandAvailH = H - patientBandH - M * 2 - 10;
     const techNeedH = [...techKeys, ...(hasWT ? ["water_treatment"] : [])]
       .reduce((s, key) => s + sH(key) + 10, 0);
     const fieldNeedW = 130 + mainCw + moduleWidth * 3;
-    const techCols = (techNeedH > bandAvailH && colW &&
-                      W - (colW * 2 + TECH_AISLE) - M * 2 >= fieldNeedW) ? 2 : 1;
+    // 2열 구성: 한 열에 안 들어가면 필수, 들어가더라도 변형 축 ⑤가 선호하면 채택
+    const twoColsFits = colW && W - (colW * 2 + TECH_AISLE) - M * 2 >= fieldNeedW;
+    const techCols = (twoColsFits && (techNeedH > bandAvailH || wantTwoCols)) ? 2 : 1;
     const techBandW = colW ? colW * techCols + TECH_AISLE * (techCols - 1) : 0;
 
     // ── 병상 필드 경계 · 주 동선 (후방 밴드보다 먼저 확정) ──
@@ -1175,10 +1232,16 @@ const FloorCanvas = (() => {
     const fieldX1 = techSide === "right" ? W - techBandW - M - DOOR_CLEAR : W - 30;
     const fieldY1 = H - patientBandH - M - DOOR_CLEAR; // 환자 밴드 문 앞 복도 위까지
     // 동선-배관 분리 설계: 주 동선을 필드 '가장자리'에 두어 병상 열·콘솔·
-    // 배관 주행선이 사람 이동 통로를 가로지르지 않게 한다
-    const corridor = techSide === "left"
-      ? { x0: fieldX1 - mainCw, x1: fieldX1 }   // 기술 밴드 반대편 가장자리
-      : { x0: fieldX0, x1: fieldX0 + mainCw };
+    // 배관 주행선이 사람 이동 통로를 가로지르지 않게 한다.
+    // 죽은 공간 제거: 병상 격자(피치)로 딱 떨어지지 않는 잔여 폭을 주 동선이
+    // 흡수한다 — 필드 끝에 사람이 쓸 수 없는 자투리가 남지 않는다.
+    const slackW = Math.max(0, ((fieldX1 - fieldX0) - mainCw) % moduleWidth);
+    const mainCwFit = mainCw + Math.floor(slackW / 10) * 10;
+    // 변형 축 ②: 주 동선을 후방 밴드 반대편(far) 또는 후방 밴드 쪽(near)에 둔다
+    const corridorAtRight = (techSide === "left") === (corridorSide === "far");
+    const corridor = corridorAtRight
+      ? { x0: fieldX1 - mainCwFit, x1: fieldX1 }
+      : { x0: fieldX0, x1: fieldX0 + mainCwFit };
 
     // ── 간호처치실·조제실은 N.S에 붙인다 (업로드 도면 27bed 구성) ──
     // 처치·투약 준비는 스테이션 업무의 연장이므로 N.S에서 바깥쪽으로
@@ -1198,6 +1261,7 @@ const FloorCanvas = (() => {
     const stripPlan = [];
     if (hasNS && !lockedHas("nurse_station")) {
       let left = stripAvailW;
+      // 간호처치실이 항상 N.S에 먼저 붙고 그 바깥에 조제실이 이어진다
       ["treatment_room", "pharmacy_room"].forEach((key) => {
         if (!chosen.includes(key) || lockedHas(key) || left < 200) return;
         const w = Math.min(bW(key), left);
@@ -1343,6 +1407,22 @@ const FloorCanvas = (() => {
       }
     }
 
+    // ── 후방 밴드 문 앞 세로 복도 표기 ──
+    // 후방 실 문을 나서면 바로 통로가 되는 구간(DOOR_CLEAR)을 동선으로 명시한다.
+    // 표기가 없으면 도면상 '빈 바닥'처럼 보이지만 실제로는 지원 동선이다.
+    if (techBandW) {
+      const cx = techSide === "left" ? techBandW + M : W - techBandW - M - DOOR_CLEAR;
+      const zone = new fabric.Rect({
+        left: cx + 2, top: M + 10, width: DOOR_CLEAR - 4,
+        height: H - patientBandH - M * 2 - 10,
+        fill: "rgba(120,144,156,0.10)", stroke: "#78909C",
+        strokeWidth: 1.5, strokeDashArray: [12, 10],
+        selectable: false, evented: false,
+      });
+      zone.meta = { key: "annotation", label: "후방 실 앞 통로" };
+      canvas.add(zone);
+    }
+
     // ── 반출입(서비스) 동선 표기: 오물처리실 ↔ 외부 ──
     // 환자 주 출입구(하단)와 대각으로 분리된 상단 코너에서 오물 반출·물품 입고가
     // 이루어짐을 화살표와 라벨로 명시한다 (청결/오염 동선 교차 방지)
@@ -1370,24 +1450,28 @@ const FloorCanvas = (() => {
     // 배치 순서: 안쪽(조제·처치) → 출입구 쪽(화장실→탈의→대기).
     // 대기실이 주 출입구 바로 옆에 와서 출입구와 직접 연결된다.
     {
-      // 밴드는 후방 밴드 앞 세로 복도(DOOR_CLEAR)를 침범하지 않는다 —
-      // 끝 실과 후방 실 사이에 사람이 다닐 통로가 항상 남는다
-      const bandX0 = techSide === "left" ? techBandW + M + DOOR_CLEAR : corridor.x1 + 10;
-      const xMax = techSide === "left" ? corridor.x0 - 10 : W - techBandW - M - DOOR_CLEAR;
+      // 환자 밴드는 후방 밴드 '아래' 구역까지 포함해 하단 전폭을 쓴다 —
+      // 후방 밴드는 환자 밴드 위에서 끝나므로 그 아래를 비워두면 죽은 공간이 된다.
+      // 주 동선 구간만 비우고 그 너머로 이어서 채운다.
+      const bandX0 = M + 30;
+      const xMax = W - 30;
+      // 주 동선이 밴드를 가로지르는 구간 (이 구간은 건너뛴다)
+      const gapX0 = corridor.x0 - 10, gapX1 = corridor.x1 + 10;
+      const usableW = (xMax - bandX0) - (gapX1 - gapX0);
       // 간호처치실·조제실이 N.S 옆 스트립으로 올라간 경우 환자 밴드에서는 제외한다
       const bandKeys = patientKeys.filter((k) => !inStrip(k));
-      // techSide=right면 출입구(왼쪽)부터 채우므로 순서를 뒤집는다
-      const orderKeys = techSide === "left" ? [...bandKeys] : [...bandKeys].reverse();
+      // 주 동선이 왼쪽이면 출입구부터 채우므로 순서를 뒤집는다 (대기실이 출입구 옆)
+      const orderKeys = corridorAtRight ? [...bandKeys] : [...bandKeys].reverse();
       // 폭 부족 시 출입구에서 먼 실(조제·처치)부터 제외해 대기·탈의실을 보장
       const fitKeys = [...orderKeys];
       while (fitKeys.length &&
-             fitKeys.reduce((s, key) => s + sW(key) + 10, 0) > xMax - bandX0) {
-        if (techSide === "left") fitKeys.shift(); else fitKeys.pop();
+             fitKeys.reduce((s, key) => s + sW(key) + 10, 0) > usableW) {
+        if (corridorAtRight) fitKeys.shift(); else fitKeys.pop();
       }
       // 남는 폭을 각 실에 비례 배분해 밴드를 정확히 채운다 —
       // 실 사이 틈(사람이 지나갈 수 없는 슬리버)과 빈 공간을 없앤다
       const baseW = fitKeys.reduce((s, key) => s + sW(key), 0);
-      const slack = Math.max(0, (xMax - bandX0) - baseW);
+      const slack = Math.max(0, usableW - baseW);
       // 남는 폭은 크기를 지정하지 않은 실에만 배분한다 (모두 지정이면 전체 배분)
       const growKeys = fitKeys.filter((k) => !userSize(k));
       const growPool = growKeys.length ? growKeys : fitKeys;
@@ -1397,10 +1481,16 @@ const FloorCanvas = (() => {
       fitKeys.forEach((key, i) => {
         if (lockedHas(key)) return; // 잠긴 동일 실이 있으면 새로 만들지 않는다
         // 마지막 실은 남은 폭을 모두 흡수해 밴드 끝까지 붙인다 (틈 방지 우선)
-        const w = i === fitKeys.length - 1
+        let w = i === fitKeys.length - 1
           ? Math.max(sW(key), xMax - px)
           : sW(key) + (growPool.includes(key) ? grow : 0);
         const roomTop = H - patientBandH - M;
+        // 주 동선 구간에 걸치면 통째로 건너뛴다 (출입구 앞을 막지 않는다)
+        if (px < gapX1 && px + w > gapX0) {
+          if (px < gapX0 && gapX0 - px >= 150) w = gapX0 - px;   // 앞쪽에 실이 들어갈 만하면 잘라 쓰고
+          else px = gapX1;                                        // 아니면 통로 너머로 넘어간다
+          if (i === fitKeys.length - 1) w = Math.max(sW(key), xMax - px);
+        }
         const hz = hitLocked(px, roomTop, w, patientBandH);
         if (hz) px = Math.round((hz.x1 + 5) / 10) * 10; // 잠금 구역 뒤로 밀어 배치
         if (px + w > xMax + 1) return;
@@ -1410,7 +1500,7 @@ const FloorCanvas = (() => {
           // 대기실은 주 출입구와 직접 연결 — 주 동선 쪽 벽에 양짝문
           const dl = doorData.double_swing_door.width;
           const my = roomTop + Math.round(patientBandH / 2);
-          const onRight = techSide === "left"; // 주 동선이 오른쪽이면 오른쪽 벽
+          const onRight = corridorAtRight; // 주 동선 쪽 벽에 단다
           const edge = onRight ? px + w : px;
           addDoor("double_swing_door", {
             anchor: { x: edge, y: my }, roomSide: onRight ? "right" : "left", silent: true,
@@ -1442,7 +1532,11 @@ const FloorCanvas = (() => {
       // 격리실은 병상 모듈 + 머리맡 40cm + 발쪽 이격 800mm이 들어가도록 키운다
       const isoW = Math.max(bW("isolation_room"), moduleWidth + 60);
       const isoH = Math.max(bH("isolation_room"), 40 + moduleDepth + MEDICAL_RULES.FOOT_WALL_CLEARANCE_CM + 10);
-      const ix = techSide === "left" ? W - isoW - M : M;
+      // 격리실은 주 동선 반대편 코너 — 스트립이 [격리실][N.S][처치][조제] 순으로
+      // 주 동선 쪽을 향해 이어지고, 감염 구역이 주 출입 동선에서 가장 멀어진다
+      // 필드 경계 안쪽에 두어 후방 밴드와 사이에 통로(DOOR_CLEAR)가 남게 한다 —
+      // 후방 실과 격리실 사이에 사람이 못 지나는 좁은 틈이 생기지 않는다
+      const ix = corridorAtRight ? fieldX0 : fieldX1 - isoW;
       addEquipment("isolation_room", { left: ix, top: M, width: isoW, height: isoH, silent: true });
       // 격리실 문: 아래쪽 벽(병상 필드 쪽) 중앙 미닫이
       const isoDx = ix + Math.round(isoW / 2);
@@ -1473,12 +1567,18 @@ const FloorCanvas = (() => {
       // 격리실 안쪽(주 동선 쪽)에 바로 붙인다
       // 격리실 벽에 밀착 — 사이에 사람이 못 지나는 좁은 틈(300mm)을 만들지 않는다
       let nsX = isoZone
-        ? (techSide === "left" ? isoZone.left - nsW : isoZone.right)
-        : (techSide === "left" ? corridor.x0 - nsW - 20 : corridor.x1 + 20);
+        ? (corridorAtRight ? isoZone.right : isoZone.left - nsW)
+        : (corridorAtRight ? corridor.x0 - nsW - 20 : corridor.x1 + 20);
       const nsY = M + 20;
+      // 스트립(처치·조제)이 붙을 폭까지 확보한 위치로 클램프 —
+      // N.S만 밀려나 스트립과 떨어지는 일이 없도록 한다
+      const needStrip = stripPlan.reduce((a, r) => a + r.w, 0);
+      nsX = corridorAtRight
+        ? Math.max(fieldX0, Math.min(nsX, fieldX1 - nsW - needStrip))
+        : Math.min(fieldX1 - nsW, Math.max(nsX, fieldX0 + needStrip));
       nsX = Math.max(fieldX0, Math.min(nsX, fieldX1 - nsW));
-      // 출입 개구부는 간호처치실 쪽 팔에 — 처치실↔스테이션 이동이 최단이 된다
-      const ns = addStationIsland(nsX, nsY, stationSeats, techSide === "left" ? "left" : "right");
+      // 출입 개구부는 처치실이 붙는 쪽 팔에 — 처치실↔스테이션 이동이 최단
+      const ns = addStationIsland(nsX, nsY, stationSeats, corridorAtRight ? "right" : "left");
       nsZone = { left: nsX, right: nsX + ns.w, top: nsY, bottom: nsY + ns.h };
       stripBottom = Math.max(stripBottom, nsZone.bottom);
       // 관찰 시야 표시: 개방면(아래)에서 병상 필드로 향하는 시야각
@@ -1496,10 +1596,17 @@ const FloorCanvas = (() => {
     if (nsZone && stripPlan.length) {
       // 스트립 높이(격리실·N.S 중 깊은 쪽)에 맞춰 아래 병상 밴드와 라인을 맞춘다
       const rowH = Math.max(stripBottom - M, ...stripPlan.map((r) => bH(r.key)));
-      let edge = techSide === "left" ? nsZone.left : nsZone.right; // 다음 실이 붙을 경계
+      // 스트립은 N.S에서 주 동선 쪽으로 이어 붙인다 (격리실 → N.S → 처치 → 조제)
+      const growLeft = !corridorAtRight;
+      let edge = growLeft ? nsZone.left : nsZone.right;
       stripPlan.forEach(({ key, w }) => {
-        const rx = techSide === "left" ? edge - w : edge;
-        if (rx < fieldX0 || rx + w > fieldX1 || hitLocked(rx, M, w, rowH)) return;
+        // 남는 폭에 맞춰 줄여서라도 붙인다 — 스테이션과 떨어지지 않게 한다
+        const avail = growLeft ? edge - fieldX0 : fieldX1 - edge;
+        const ww = Math.min(w, Math.floor(avail / 10) * 10);
+        if (ww < 150) return;                       // 1,500mm 미만이면 이 구성에선 생략
+        const rx = growLeft ? edge - ww : edge;
+        if (hitLocked(rx, M, ww, rowH)) return;
+        w = ww;
         addEquipment(key, { left: rx, top: M, width: w, height: rowH, silent: true });
         // 문은 아래쪽(병상 필드 = N.S 관찰 구역) 벽 중앙 — 스테이션과 바로 통한다
         const dx = rx + Math.round(w / 2);
@@ -1508,7 +1615,7 @@ const FloorCanvas = (() => {
           [{ x0: dx - 70, x1: dx + 70, y0: M + rowH - 110, y1: M + rowH + 5 }]);
         stripZones.push({ key, left: rx, right: rx + w, top: M, bottom: M + rowH });
         stripBottom = Math.max(stripBottom, M + rowH);
-        edge = techSide === "left" ? rx : rx + w; // 다음 실은 이 실의 바깥쪽에 붙는다
+        edge = growLeft ? rx : rx + w; // 다음 실은 이 실의 바깥쪽에 붙는다
       });
     }
 
@@ -1600,8 +1707,20 @@ const FloorCanvas = (() => {
     if (bandsBelowStrip) {
       by = stripBottom + Math.max(aisle, 100); // 스트립 아래 전폭에서 시작 (회피 불필요)
     }
-    // 빈 공간이 남지 않도록 필드가 허용하는 한 밴드를 계속 만든다 (최대 채움)
-    while (by + MD + CD + MD <= fieldY1) {
+    // ── 죽은 공간 최소화: 밴드 구성을 '탐색'해서 가장 많이 채우는 조합을 고른다 ──
+    // 양면 밴드 n조 (+ 단면 행 1개) 조합 중 잔여 높이가 가장 작은 것을 택하고,
+    // 그래도 남는 높이는 통로에 균등 배분해 자투리 띠를 없앤다.
+    const bandH = MD + CD + 6 + MD;              // 양면 밴드 한 조의 깊이
+    const singleH = CD + 6 + MD;                 // 단면 행(콘솔 + 한 줄) 깊이
+    const availBandH = fieldY1 - by;
+    const plan = planBands(availBandH);
+    // 남는 높이를 통로에 배분하되 요청 폭의 60%까지만 넓힌다
+    const aisleFit = plan.gaps > 0
+      ? aisle + Math.min(Math.round(aisle * 0.6),
+          Math.floor(plan.waste / plan.gaps / 10) * 10)
+      : aisle;
+    let madeBands = 0;
+    while (madeBands < plan.nb && by + MD + CD + MD <= fieldY1) {
       // 양면 밴드: 위 행(머리 아래쪽) + 콘솔 + 아래 행(머리 위쪽).
       // 범위는 행마다 따로 계산한다 — 상단 스트립보다 아래에 있는 행은 스트립에
       // 막히지 않고 필드 전폭을 쓰므로 스트립 아래에 죽은 공간이 생기지 않는다.
@@ -1613,10 +1732,11 @@ const FloorCanvas = (() => {
         layConsole(consoleY, [...above, ...below]);
         bands.push({ consoleY, above, below });
       }
-      by += MD + CD + 6 + MD + aisle;
+      by += bandH + aisleFit;
+      madeBands += 1;
     }
-    // 남은 높이에 단면(콘솔 위 머리↑) 행 하나를 추가 시도
-    if (by + CD + MD <= fieldY1) {
+    // 계획된 단면(콘솔 위 머리↑) 행 추가 — 남는 높이를 마저 채운다
+    if ((plan.single || plan.nb === 0) && by + CD + MD <= fieldY1) {
       const single = fillRow(by + CD + 6, false);
       if (single.length) {
         layConsole(by + 3, single);
