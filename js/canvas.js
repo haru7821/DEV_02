@@ -1112,6 +1112,9 @@ const FloorCanvas = (() => {
     const techSide = pick(["left", "right"]);        // ① 서비스 존(후방 밴드) 방향
     const corridorSide = pick(["far", "near"]);      // ② 주 동선을 후방 밴드 반대편 | 같은 편
     const wantTwoCols = rng() < 0.5;                 // ③ 후방 밴드 2열 구성 선호
+    // ④ N.S 위치: 상단 스트립 | 병상 필드와 환자 밴드 사이의 '중앙 아일랜드'
+    //    (25BED 도면형 — 카운터가 필드 한가운데서 모든 병상 열을 마주본다)
+    const nsIsland = rng() < 0.5;
     const hasWT = chosen.includes("water_treatment");
     const hasIso = chosen.includes("isolation_room");
     // 후방 밴드 적층 순서 (값이 작을수록 위 = 환자 출입구에서 먼 쪽).
@@ -1557,6 +1560,15 @@ const FloorCanvas = (() => {
     // 병상 밴드를 스트립 아래 전폭에서 시작해 파편·빈 포켓을 만들지 않는다.
     let nsZone = null;
     let stripBottom = isoZone ? isoZone.bottom : 0;
+    // 중앙 아일랜드형: 병상 필드 맨 아래(환자 밴드 문 앞 복도 바로 위)에 카운터 열을
+    // 두고 병상 밴드는 그 위쪽에서만 형성된다 — 카운터가 전 병상을 정면으로 마주본다.
+    const islandH = Math.max(MEDICAL_RULES.NS_DEPTH_CM,
+      40 + MEDICAL_RULES.NS_ENTRY_CM + equipmentData.station_desk2.height);
+    const useIsland = hasNS && nsIsland && !lockedHas("nurse_station")
+      && fieldY1 - (M + 20) > islandH + aisle + moduleDepth * 2 + consoleDepth;
+    const stripTop = useIsland ? fieldY1 - islandH : M + 20;
+    // 병상 밴드가 쓸 수 있는 아래 한계 (아일랜드형이면 카운터 위까지)
+    const bandY1 = useIsland ? stripTop - aisle : fieldY1;
     if (hasNS && lockedHas("nurse_station")) {
       const ln = lockedObjs.find((o) => o.meta.key === "nurse_station");
       const r = ln.getBoundingRect(true);
@@ -1566,24 +1578,31 @@ const FloorCanvas = (() => {
       const nsW = nsW0; // 1열 배치 폭 (스트립 폭 계산과 동일 식)
       // 격리실 안쪽(주 동선 쪽)에 바로 붙인다
       // 격리실 벽에 밀착 — 사이에 사람이 못 지나는 좁은 틈(300mm)을 만들지 않는다
-      let nsX = isoZone
-        ? (corridorAtRight ? isoZone.right : isoZone.left - nsW)
-        : (corridorAtRight ? corridor.x0 - nsW - 20 : corridor.x1 + 20);
-      const nsY = M + 20;
+      // 아일랜드형: N.S를 필드 바깥쪽 끝에 붙이고 스트립이 주 동선 쪽으로 이어져
+      // 열 전체가 필드를 가로지른다 — 카운터 옆에 빈 바닥이 남지 않는다
+      let nsX = useIsland
+        ? (corridorAtRight ? fieldX0 : fieldX1 - nsW)
+        : (isoZone
+            ? (corridorAtRight ? isoZone.right : isoZone.left - nsW)
+            : (corridorAtRight ? corridor.x0 - nsW - 20 : corridor.x1 + 20));
+      const nsY = stripTop;
       // 스트립(처치·조제)이 붙을 폭까지 확보한 위치로 클램프 —
       // N.S만 밀려나 스트립과 떨어지는 일이 없도록 한다
+      // 스트립이 자라는 쪽에 필요한 폭을 반드시 남긴다 — 처치·조제실이
+      // 자리를 못 잡고 사라지는 일이 없도록 한다 (growLeft = !corridorAtRight)
       const needStrip = stripPlan.reduce((a, r) => a + r.w, 0);
       nsX = corridorAtRight
-        ? Math.max(fieldX0, Math.min(nsX, fieldX1 - nsW - needStrip))
-        : Math.min(fieldX1 - nsW, Math.max(nsX, fieldX0 + needStrip));
+        ? Math.min(nsX, fieldX1 - nsW - needStrip)
+        : Math.max(nsX, fieldX0 + needStrip);
       nsX = Math.max(fieldX0, Math.min(nsX, fieldX1 - nsW));
       // 출입 개구부는 처치실이 붙는 쪽 팔에 — 처치실↔스테이션 이동이 최단
       const ns = addStationIsland(nsX, nsY, stationSeats, corridorAtRight ? "right" : "left");
       nsZone = { left: nsX, right: nsX + ns.w, top: nsY, bottom: nsY + ns.h };
       stripBottom = Math.max(stripBottom, nsZone.bottom);
       // 관찰 시야 표시: 개방면(아래)에서 병상 필드로 향하는 시야각
-      const eye = new fabric.Text("▽ 관찰 시야", {
-        left: nsX + ns.w / 2, top: nsY + ns.h + 6, fontSize: 20, fill: "#E65100",
+      const eye = new fabric.Text(useIsland ? "△ 관찰 시야" : "▽ 관찰 시야", {
+        left: nsX + ns.w / 2, top: useIsland ? nsY - 28 : nsY + ns.h + 6,
+        fontSize: 20, fill: "#E65100",
         originX: "center", selectable: false, evented: false,
       });
       eye.meta = { key: "annotation", label: "N.S 관찰 시야" };
@@ -1595,26 +1614,37 @@ const FloorCanvas = (() => {
     const stripZones = [];
     if (nsZone && stripPlan.length) {
       // 스트립 높이(격리실·N.S 중 깊은 쪽)에 맞춰 아래 병상 밴드와 라인을 맞춘다
-      const rowH = Math.max(stripBottom - M, ...stripPlan.map((r) => bH(r.key)));
+      const rowH = useIsland ? islandH
+        : Math.max(stripBottom - M, ...stripPlan.map((r) => bH(r.key)));
       // 스트립은 N.S에서 주 동선 쪽으로 이어 붙인다 (격리실 → N.S → 처치 → 조제)
       const growLeft = !corridorAtRight;
       let edge = growLeft ? nsZone.left : nsZone.right;
       stripPlan.forEach(({ key, w }) => {
         // 남는 폭에 맞춰 줄여서라도 붙인다 — 스테이션과 떨어지지 않게 한다
-        const avail = growLeft ? edge - fieldX0 : fieldX1 - edge;
-        const ww = Math.min(w, Math.floor(avail / 10) * 10);
-        if (ww < 150) return;                       // 1,500mm 미만이면 이 구성에선 생략
+        const limit = useIsland ? (growLeft ? corridor.x1 + 10 : corridor.x0 - 10)
+                                : (growLeft ? fieldX0 : fieldX1);
+        const avail = growLeft ? edge - limit : limit - edge;
+        // 아일랜드형은 마지막 실이 남은 폭을 모두 흡수해 열을 끝까지 채운다
+        const isLast = key === stripPlan[stripPlan.length - 1].key;
+        const ww = (useIsland && isLast)
+          ? Math.floor(avail / 10) * 10
+          : Math.min(w, Math.floor(avail / 10) * 10);
+        if (ww < 120) return;                       // 1,200mm 미만이면 이 구성에선 생략
         const rx = growLeft ? edge - ww : edge;
-        if (hitLocked(rx, M, ww, rowH)) return;
+        if (hitLocked(rx, stripTop, ww, rowH)) return;
         w = ww;
-        addEquipment(key, { left: rx, top: M, width: w, height: rowH, silent: true });
-        // 문은 아래쪽(병상 필드 = N.S 관찰 구역) 벽 중앙 — 스테이션과 바로 통한다
+        addEquipment(key, { left: rx, top: stripTop, width: w, height: rowH, silent: true });
+        // 문은 병상 필드 쪽 벽 중앙 — 스테이션과 바로 통한다
+        // (상단 스트립이면 아래쪽 변, 중앙 아일랜드면 위쪽 변이 필드 쪽)
         const dx = rx + Math.round(w / 2);
-        addDoor("swing_door", { anchor: { x: dx, y: M + rowH }, roomSide: "bottom", silent: true });
-        populateRoom(key, rx, M, w, rowH,
-          [{ x0: dx - 70, x1: dx + 70, y0: M + rowH - 110, y1: M + rowH + 5 }]);
-        stripZones.push({ key, left: rx, right: rx + w, top: M, bottom: M + rowH });
-        stripBottom = Math.max(stripBottom, M + rowH);
+        const dy = useIsland ? stripTop : stripTop + rowH;
+        addDoor("swing_door", { anchor: { x: dx, y: dy },
+          roomSide: useIsland ? "top" : "bottom", silent: true });
+        populateRoom(key, rx, stripTop, w, rowH, [useIsland
+          ? { x0: dx - 70, x1: dx + 70, y0: stripTop - 5, y1: stripTop + 110 }
+          : { x0: dx - 70, x1: dx + 70, y0: stripTop + rowH - 110, y1: stripTop + rowH + 5 }]);
+        stripZones.push({ key, left: rx, right: rx + w, top: stripTop, bottom: stripTop + rowH });
+        stripBottom = Math.max(stripBottom, stripTop + rowH);
         edge = growLeft ? rx : rx + w; // 다음 실은 이 실의 바깥쪽에 붙는다
       });
     }
@@ -1623,7 +1653,7 @@ const FloorCanvas = (() => {
     const stripUsed = (isoZone ? isoZone.right - isoZone.left + 45 : 0) +
                       (nsZone ? nsZone.right - nsZone.left + 45 : 0) +
                       stripZones.reduce((s, z) => s + (z.right - z.left) + 45, 0);
-    const bandsBelowStrip = stripBottom > 0 &&
+    const bandsBelowStrip = !useIsland && stripBottom > 0 &&
       (fieldX1 - fieldX0) - stripUsed < moduleWidth * 2 + 40;
 
     // ── 병상 필드: 콘솔 양면(back-to-back) 밴드 구조 ──
@@ -1712,7 +1742,7 @@ const FloorCanvas = (() => {
     // 그래도 남는 높이는 통로에 균등 배분해 자투리 띠를 없앤다.
     const bandH = MD + CD + 6 + MD;              // 양면 밴드 한 조의 깊이
     const singleH = CD + 6 + MD;                 // 단면 행(콘솔 + 한 줄) 깊이
-    const availBandH = fieldY1 - by;
+    const availBandH = bandY1 - by;
     const plan = planBands(availBandH);
     // 남는 높이를 통로에 배분하되 요청 폭의 60%까지만 넓힌다
     const aisleFit = plan.gaps > 0
@@ -1720,7 +1750,7 @@ const FloorCanvas = (() => {
           Math.floor(plan.waste / plan.gaps / 10) * 10)
       : aisle;
     let madeBands = 0;
-    while (madeBands < plan.nb && by + MD + CD + MD <= fieldY1) {
+    while (madeBands < plan.nb && by + MD + CD + MD <= bandY1) {
       // 양면 밴드: 위 행(머리 아래쪽) + 콘솔 + 아래 행(머리 위쪽).
       // 범위는 행마다 따로 계산한다 — 상단 스트립보다 아래에 있는 행은 스트립에
       // 막히지 않고 필드 전폭을 쓰므로 스트립 아래에 죽은 공간이 생기지 않는다.
@@ -1736,7 +1766,7 @@ const FloorCanvas = (() => {
       madeBands += 1;
     }
     // 계획된 단면(콘솔 위 머리↑) 행 추가 — 남는 높이를 마저 채운다
-    if ((plan.single || plan.nb === 0) && by + CD + MD <= fieldY1) {
+    if ((plan.single || plan.nb === 0) && by + CD + MD <= bandY1) {
       const single = fillRow(by + CD + 6, false);
       if (single.length) {
         layConsole(by + 3, single);
