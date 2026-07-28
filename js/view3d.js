@@ -21,7 +21,6 @@ const View3D = (() => {
   let overlay = null, canvasEl = null, raf = null, lastRoom = null;
   let flight = null;      // 드론 비행 녹화 진행 상태 (null이면 비행 중 아님)
   let bedBounds = null;   // 병상 필드 범위(cm) — 눈높이 카메라 기준점
-  let bedLane = null;     // 병상 밴드 사이 보조통로(cm) — 드론 눈높이 통과 경로
 
   /* ───────── 재질 (실사 렌더러로 내보낼 때 그대로 매핑된다) ───────── */
   const MAT = {};
@@ -90,33 +89,418 @@ const View3D = (() => {
     }
   }
 
+  /* ═════════ 드론 안전 항로 ═════════
+   * 촬영 드론이 벽·병상에 바짝 붙거나 뚫고 지나가지 않도록,
+   *  ① 도면 전체를 격자로 훑어 '장애물까지의 여유(cm)' 지도를 만들고,
+   *  ② 사람이 실제로 걷는 동선(주 동선·보조 동선) 위주로 항로를 잇는다.
+   * 두 단계 모두 도면 좌표(cm)로 계산하고, 카메라에 줄 때만 m로 환산한다. */
+
+  const NAV = {
+    CELL: 5,      // 항로 격자 한 칸 (cm)
+    WIDE: 90,     // 넉넉한 이격 (cm) — 공간이 되는 구간은 이만큼 띄운다
+    SAFE: 56,     // 절대 최소 이격 (cm) — 최소 통로 1,160mm를 한가운데로 지나는 값
+    IDEAL: 170,   // 이만큼 떨어지면 감점 없음 — 늘 통로 한가운데로 붙는다 (cm)
+    EYE: 1.5,     // 통로 비행 고도 (m) — 사람 눈높이
+    LOOK: 3.0,    // 진행 방향 앞을 내다보는 거리 (m)
+    SPEED: 2.4,   // 통로 구간 최대 속도 (m/s) — 항로 길이를 이 값으로 자른다
+  };
+  let nav = null;      // 여유 지도 { cell, cols, rows, clear:Float32Array, w, h }
+  let route = null;    // 사람 동선을 따르는 지상 항로 [{x,y}] (도면 cm)
+  let navMin = NAV.WIDE;  // 이번 항로가 실제로 확보한 최소 이격 (cm)
+
+  /** 통행을 막는 객체인가 — 배관·주석·문·모듈 경계선은 걸어서 지날 수 있다 */
+  function navBlocks(o) {
+    if (!o.meta || o.meta.isDoor) return false;
+    if (["pipe", "annotation", "module_frame", "dimension"].includes(o.meta.key)) return false;
+    const r = rectOf(o);
+    return r.w > 5 && r.d > 5;
+  }
+
   /**
-   * 병상 밴드 사이의 '빈 통로'를 찾는다 — 드론이 눈높이로 지나갈 길.
-   * 병상 유닛 사각형을 가로띠(z)로 투영해, 어느 유닛에도 걸리지 않는
-   * 가장 긴 구간의 중앙을 통로로 본다. 통로가 없으면 null.
-   * 반환: { z, x0, x1 } (cm) — z 높이의 가로 통로를 x0→x1로 지난다.
+   * 여유 지도를 만든다. 장애물 칸은 0, 나머지는 가장 가까운 장애물까지의 거리(cm).
+   * 거리는 2패스 chamfer 변환으로 구한다 (격자 전체를 두 번만 훑어 빠르다).
    */
-  function findLane(rects) {
-    if (rects.length < 2) return null;
-    const y0 = Math.min(...rects.map((r) => r.y));
-    const y1 = Math.max(...rects.map((r) => r.y + r.d));
-    const STEP = 5, PAD = 25;              // 통로 폭은 좌우 250mm 여유까지 본다
-    let best = null, run = null;
-    for (let z = y0; z <= y1; z += STEP) {
-      const free = !rects.some((r) => z > r.y - PAD && z < r.y + r.d + PAD);
-      if (free) run = run ? { a: run.a, b: z } : { a: z, b: z };
-      else {
-        if (run && (!best || run.b - run.a > best.b - best.a)) best = run;
-        run = null;
+  function buildNav(room, objs) {
+    const cell = NAV.CELL;
+    const cols = Math.max(4, Math.ceil(room.width / cell));
+    const rows = Math.max(4, Math.ceil(room.height / cell));
+    const clear = new Float32Array(cols * rows).fill(Infinity);
+    const fill = (x, y, w, d) => {
+      const i0 = Math.max(0, Math.floor(x / cell)), i1 = Math.min(cols - 1, Math.ceil((x + w) / cell) - 1);
+      const j0 = Math.max(0, Math.floor(y / cell)), j1 = Math.min(rows - 1, Math.ceil((y + d) / cell) - 1);
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) clear[j * cols + i] = 0;
+    };
+    // 외벽 4면 (실내 쪽으로 벽 두께만큼)
+    fill(0, 0, room.width, WALL_T);
+    fill(0, room.height - WALL_T, room.width, WALL_T);
+    fill(0, 0, WALL_T, room.height);
+    fill(room.width - WALL_T, 0, WALL_T, room.height);
+    // 부속실·설비·병상 유닛 — 회전 객체는 축 정렬 바운딩으로 넉넉히 잡는다
+    objs.filter(navBlocks).forEach((o) => {
+      const r = rectOf(o);
+      fill(r.x, r.y, r.w, r.d);
+    });
+
+    const D1 = cell, D2 = cell * Math.SQRT2;
+    const relax = (k, kk, w) => { const v = clear[kk] + w; if (v < clear[k]) clear[k] = v; };
+    for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+      const k = j * cols + i;
+      if (!clear[k]) continue;
+      if (i > 0) relax(k, k - 1, D1);
+      if (j > 0) relax(k, k - cols, D1);
+      if (i > 0 && j > 0) relax(k, k - cols - 1, D2);
+      if (i < cols - 1 && j > 0) relax(k, k - cols + 1, D2);
+    }
+    for (let j = rows - 1; j >= 0; j--) for (let i = cols - 1; i >= 0; i--) {
+      const k = j * cols + i;
+      if (!clear[k]) continue;
+      if (i < cols - 1) relax(k, k + 1, D1);
+      if (j < rows - 1) relax(k, k + cols, D1);
+      if (i < cols - 1 && j < rows - 1) relax(k, k + cols + 1, D2);
+      if (i > 0 && j < rows - 1) relax(k, k + cols - 1, D2);
+    }
+    nav = { cell, cols, rows, clear, w: room.width, h: room.height };
+  }
+
+  /** 도면 좌표(cm)에서 장애물까지의 여유(cm) — 도면 밖은 0 */
+  function clearAt(x, y) {
+    if (!nav) return NAV.IDEAL;
+    const i = Math.floor(x / nav.cell), j = Math.floor(y / nav.cell);
+    if (i < 0 || j < 0 || i >= nav.cols || j >= nav.rows) return 0;
+    return nav.clear[j * nav.cols + i];
+  }
+
+  const cellPt = (k) => ({
+    x: ((k % nav.cols) + 0.5) * nav.cell,
+    y: (Math.floor(k / nav.cols) + 0.5) * nav.cell,
+  });
+  const dist2D = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+  /** 주어진 점에서 가장 가까운 '안전한 칸' — 벽 속을 가리키는 목표점을 보정한다 */
+  function snapFree(p, floor) {
+    const { cols, rows, cell, clear } = nav;
+    const ci = Math.min(cols - 1, Math.max(0, Math.floor(p.x / cell)));
+    const cj = Math.min(rows - 1, Math.max(0, Math.floor(p.y / cell)));
+    const R = Math.round(250 / cell);  // 2.5m 안에서 찾는다 (더 멀면 벽 너머로 건너뛸 수 있다)
+    let best = -1, bestD = Infinity;
+    for (let j = Math.max(0, cj - R); j <= Math.min(rows - 1, cj + R); j++) {
+      for (let i = Math.max(0, ci - R); i <= Math.min(cols - 1, ci + R); i++) {
+        const k = j * cols + i;
+        if (clear[k] < floor) continue;
+        const d = (i - ci) ** 2 + (j - cj) ** 2;
+        if (d < bestD) { bestD = d; best = k; }
       }
     }
-    if (run && (!best || run.b - run.a > best.b - best.a)) best = run;
-    if (!best || best.b - best.a < 90) return null;   // 900mm 미만이면 통로로 안 본다
-    return {
-      z: (best.a + best.b) / 2,
-      x0: Math.min(...rects.map((r) => r.x)),
-      x1: Math.max(...rects.map((r) => r.x + r.w)),
+    return best < 0 ? null : best;
+  }
+
+  /** A*용 최소 힙 */
+  function minHeap() {
+    const a = [], f = [];
+    const swap = (x, y) => {
+      const t = a[x]; a[x] = a[y]; a[y] = t;
+      const s = f[x]; f[x] = f[y]; f[y] = s;
     };
+    return {
+      get size() { return a.length; },
+      push(v, p) {
+        a.push(v); f.push(p);
+        for (let i = a.length - 1; i > 0;) {
+          const par = (i - 1) >> 1;
+          if (f[par] <= f[i]) break;
+          swap(par, i); i = par;
+        }
+      },
+      pop() {
+        const top = a[0], v = a.pop(), p = f.pop();
+        if (a.length) {
+          a[0] = v; f[0] = p;
+          for (let i = 0;;) {
+            const l = i * 2 + 1, r = l + 1;
+            let m = i;
+            if (l < a.length && f[l] < f[m]) m = l;
+            if (r < a.length && f[r] < f[m]) m = r;
+            if (m === i) break;
+            swap(m, i); i = m;
+          }
+        }
+        return top;
+      },
+    };
+  }
+
+  /**
+   * 여유 지도 위 A* — 이격이 floor(cm) 미만인 칸은 아예 지나지 않고,
+   * 여유가 IDEAL에 못 미치는 만큼 비용을 더해 통로 한가운데로 붙는다.
+   */
+  function navPath(from, to, floor) {
+    if (!nav) return null;
+    const { cols, rows, cell, clear } = nav;
+    const s = snapFree(from, floor), goal = snapFree(to, floor);
+    if (s == null || goal == null) return null;
+    if (s === goal) return [cellPt(s)];
+    const gi = goal % cols, gj = Math.floor(goal / cols);
+    const g = new Float32Array(cols * rows).fill(Infinity);
+    const came = new Int32Array(cols * rows).fill(-1);
+    const done = new Uint8Array(cols * rows);
+    const open = minHeap();
+    g[s] = 0;
+    open.push(s, 0);
+    while (open.size) {
+      const k = open.pop();
+      if (done[k]) continue;
+      done[k] = 1;
+      if (k === goal) break;
+      const i = k % cols, j = Math.floor(k / cols);
+      for (let dj = -1; dj <= 1; dj++) {
+        for (let di = -1; di <= 1; di++) {
+          if (!di && !dj) continue;
+          const ni = i + di, nj = j + dj;
+          if (ni < 0 || nj < 0 || ni >= cols || nj >= rows) continue;
+          const nk = nj * cols + ni;
+          if (clear[nk] < floor) continue;
+          // 대각선은 양옆이 모두 트여 있을 때만 — 모서리를 스치며 지나지 않는다
+          if (di && dj && (clear[j * cols + ni] < floor || clear[nj * cols + i] < floor)) continue;
+          const step = di && dj ? cell * Math.SQRT2 : cell;
+          const ng = g[k] + step * (1 + 3 * Math.max(0, (NAV.IDEAL - clear[nk]) / NAV.IDEAL));
+          if (ng < g[nk]) {
+            g[nk] = ng;
+            came[nk] = k;
+            open.push(nk, ng + Math.hypot(ni - gi, nj - gj) * cell);
+          }
+        }
+      }
+    }
+    if (came[goal] < 0) return null;
+    const out = [];
+    for (let k = goal; k >= 0; k = came[k]) {
+      out.push(cellPt(k));
+      if (k === s) break;
+    }
+    return out.reverse();
+  }
+
+  /** 두 점을 잇는 직선이 내내 floor 이상 떨어져 있는가 */
+  function segSafe(a, b, floor) {
+    const d = dist2D(a, b), n = Math.max(1, Math.ceil(d / (NAV.CELL * 0.6)));
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      if (clearAt(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t) < floor) return false;
+    }
+    return true;
+  }
+
+  /** 격자 계단 경로를 곧은 구간으로 당긴다 (여유가 유지되는 범위에서만) */
+  function simplify(pts, floor) {
+    if (pts.length < 3) return pts.slice();
+    const out = [pts[0]];
+    let i = 0;
+    while (i < pts.length - 1) {
+      let j = Math.min(pts.length - 1, i + 80);
+      for (; j > i + 1; j--) if (segSafe(pts[i], pts[j], floor)) break;
+      out.push(pts[j]);
+      i = j;
+    }
+    return out;
+  }
+
+  /** 폴리라인을 일정 간격으로 다시 찍는다 */
+  function resamplePoly(pts, step) {
+    const out = [pts[0]];
+    let carry = 0;
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const a = pts[i], b = pts[i + 1], seg = dist2D(a, b);
+      for (let d = step - carry; d < seg; d += step) {
+        const t = d / seg;
+        out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+      }
+      carry = (carry + seg) % step;
+    }
+    out.push(pts[pts.length - 1]);
+    return out;
+  }
+
+  const polyLen = (pts) => pts.reduce((s, p, i) => (i ? s + dist2D(pts[i - 1], p) : 0), 0);
+
+  /** 앞에서부터 maxLen(cm)만큼만 남긴다 — 영상 길이에 맞춰 항로를 자른다 */
+  function trimPoly(pts, maxLen) {
+    const out = [pts[0]];
+    let acc = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const d = dist2D(pts[i - 1], pts[i]);
+      if (acc + d > maxLen) {
+        const t = (maxLen - acc) / d;
+        out.push({ x: pts[i - 1].x + (pts[i].x - pts[i - 1].x) * t,
+                   y: pts[i - 1].y + (pts[i].y - pts[i - 1].y) * t });
+        break;
+      }
+      acc += d;
+      out.push(pts[i]);
+    }
+    return out;
+  }
+
+  /**
+   * 도면에 표시된 사람 동선을 읽는다 — 드론이 따라갈 길의 원본이다.
+   *  · 주 동선   : 출입구에서 병상 필드 입구까지의 음영 구간
+   *  · 보조 동선 : 병상 밴드 사이 간호 이동로(점선)
+   *  · 후방 복도 / 후방 실 앞 통로 : 지원실 문 앞 통로 음영
+   * 각 표시의 긴 축 중심선을 통로로 삼는다.
+   */
+  const FLOW_LANES = ["보조 동선", "후방 복도", "후방 실 앞 통로"];
+  function flowMarks() {
+    const cv = FloorCanvas.getCanvas && FloorCanvas.getCanvas();
+    let main = null;
+    const aisles = [];
+    if (!cv) return { main, aisles };
+    cv.getObjects().forEach((o) => {
+      if (!o.meta || o.meta.key !== "annotation") return;
+      const r = rectOf(o);
+      if (o.meta.label === "주 동선") { if (!main || r.d > main.d) main = r; return; }
+      if (!FLOW_LANES.includes(o.meta.label)) return;
+      if (Math.max(r.w, r.d) < 200) return;      // 2m 미만은 통로로 안 본다
+      aisles.push(r.w >= r.d
+        ? { a: { x: r.x, y: r.y + r.d / 2 }, b: { x: r.x + r.w, y: r.y + r.d / 2 } }
+        : { a: { x: r.x + r.w / 2, y: r.y }, b: { x: r.x + r.w / 2, y: r.y + r.d } });
+    });
+    return { main, aisles };
+  }
+
+  /**
+   * 통로의 진입(탈출) 지점 — 표시선의 끝은 벽·모서리에 닿아 있을 수 있으므로,
+   * 끝에서 안쪽으로 훑어 여유가 뚜렷이 커지는 첫 지점을 잡는다.
+   */
+  function laneEnd(ln, fromA) {
+    const p = fromA ? ln.a : ln.b, q = fromA ? ln.b : ln.a;
+    const len = dist2D(p, q) || 1;
+    let best = null;
+    for (let d = Math.min(40, len * 0.1); d <= len * 0.9; d += 20) {
+      const t = d / len;
+      const cl = clearAt(p.x + (q.x - p.x) * t, p.y + (q.y - p.y) * t);
+      const c = { x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t, cl };
+      if (cl >= NAV.WIDE) return c;                 // 넉넉히 트인 첫 지점이면 그대로
+      if (!best || cl > best.cl + 5) best = c;      // 아니면 가장 트인 곳 (끝에 가깝게)
+    }
+    return best || { x: p.x, y: p.y };
+  }
+
+  /** 동선 표시가 없는 도면에서, 가장 트인 지점 몇 곳을 스스로 찾는다 */
+  function openSpots(limit) {
+    const { cols, rows, cell, clear } = nav;
+    const cand = [];
+    for (let j = 1; j < rows - 1; j += 2) {
+      for (let i = 1; i < cols - 1; i += 2) {
+        const c = clear[j * cols + i];
+        if (c < NAV.WIDE) continue;
+        cand.push({ x: (i + 0.5) * cell, y: (j + 0.5) * cell, c });
+      }
+    }
+    cand.sort((a, b) => b.c - a.c);
+    const picked = [];
+    cand.some((p) => {
+      if (picked.every((q) => dist2D(p, q) > 300)) picked.push(p);   // 3m 이상 떨어뜨려 고른다
+      return picked.length >= limit;
+    });
+    return picked;
+  }
+
+  /**
+   * 사람 동선을 따르는 지상 항로를 만든다.
+   * 출입구 → 주 동선 → 통로(가까운 순, 지그재그)로 이어 붙이고, 구간마다 A*로 연결한다.
+   * 이격은 WIDE(900mm)로 먼저 시도하고, 그만큼 넓지 않은 통로는 단계적으로 낮춰
+   * 최소 SAFE(560mm)까지만 허용한다 — 실측 최소 통로(1,160mm)를 한가운데로 지나는 값이다.
+   */
+  function planRoute() {
+    if (!nav) return null;
+    const { main, aisles } = flowMarks();
+    const W = nav.w, H = nav.h;
+    const stops = [];
+    if (main) {
+      // 주 동선 음영의 긴 축 중심선 — 출입구(도면 아래쪽) 끝에서 필드 입구 쪽으로
+      const ln = main.w >= main.d
+        ? { a: { x: main.x, y: main.y + main.d / 2 }, b: { x: main.x + main.w, y: main.y + main.d / 2 } }
+        : { a: { x: main.x + main.w / 2, y: main.y }, b: { x: main.x + main.w / 2, y: main.y + main.d } };
+      const fromA = ln.a.y > ln.b.y || (ln.a.y === ln.b.y && ln.a.x > ln.b.x);
+      stops.push(laneEnd(ln, fromA), laneEnd(ln, !fromA));
+    } else {
+      stops.push({ x: W / 2, y: H - 150 });
+      stops.push({ x: W / 2, y: H / 2 });
+    }
+    // 통로: 현 위치에서 가까운 통로부터, 가까운 끝으로 들어가 반대 끝으로 빠진다
+    const rest = aisles.slice();
+    let cur = stops[stops.length - 1];
+    while (rest.length) {
+      let bi = 0, bd = Infinity, flip = false;
+      rest.forEach((ln, i) => {
+        const da = dist2D(cur, ln.a), db = dist2D(cur, ln.b);
+        if (Math.min(da, db) < bd) { bd = Math.min(da, db); bi = i; flip = db < da; }
+      });
+      const ln = rest.splice(bi, 1)[0];
+      stops.push(laneEnd(ln, !flip), laneEnd(ln, flip));
+      cur = stops[stops.length - 1];
+    }
+    // 동선 표시가 없는(직접 그린) 도면 — 트인 곳을 이어 돌아본다
+    const wander = () => openSpots(4).forEach((p) => {
+      if (dist2D(p, stops[stops.length - 1]) > 200) stops.push(p);
+    });
+    if (!aisles.length) wander();
+
+    // 항로 전체를 같은 이격으로 짠다 — 구간마다 기준이 다르면 이어 붙이는 지점이
+    // 서로 다른 곳으로 붙어 경로가 튈 수 있다. 넓게 시작해 필요한 만큼만 좁힌다.
+    const build = (floor) => {
+      const pts = [];
+      let from = stops[0], reached = 0;
+      stops.slice(1).forEach((to) => {
+        const seg = navPath(from, to, floor);
+        // 못 가는 통로는 건너뛴다. 아직 한 구간도 못 이었으면 출발점 자체를 다음으로 옮긴다
+        if (!seg || seg.length < 2) { if (!pts.length) from = to; return; }
+        const s = simplify(seg, floor);
+        const add = pts.length ? s.slice(1) : s;
+        if (!add.length) return;
+        if (pts.length && !segSafe(pts[pts.length - 1], add[0], floor)) return;
+        add.forEach((p) => pts.push(p));
+        from = to;
+        reached++;
+      });
+      return { pts, reached, floor };
+    };
+    const pick = () => {
+      let best = null;
+      [NAV.WIDE, 72, NAV.SAFE].some((floor) => {
+        const r = build(floor);
+        if (!best || r.reached > best.reached
+            || (r.reached === best.reached && polyLen(r.pts) > polyLen(best.pts) * 1.2)) best = r;
+        return best.reached >= stops.length - 1;     // 모든 통로를 도는 이격을 찾으면 그만
+      });
+      return best;
+    };
+    let best = pick();
+    // 통로가 막혀 항로가 너무 짧게 나오면, 트인 곳을 더 들러 실내를 고루 보여준다
+    if (polyLen(best.pts) < 800 && aisles.length) {
+      wander();
+      const more = pick();
+      if (polyLen(more.pts) > polyLen(best.pts)) best = more;
+    }
+    navMin = best.floor;
+    if (best.pts.length < 2 || polyLen(best.pts) < 200) return null;
+    return resamplePoly(best.pts, 30);
+  }
+
+  /** 카메라가 장애물에 붙으면 여유가 큰 쪽으로 밀어낸다 (스플라인 코너 컷 보정) */
+  function keepClear(v, minCm) {
+    if (!nav || v.y > WALL_H) return v;               // 벽 위 고도면 부딪힐 것이 없다
+    const step = nav.cell / 2;
+    for (let n = 0; n < 12; n++) {
+      const x = v.x * 100, y = v.z * 100;
+      if (clearAt(x, y) >= minCm) break;
+      const gx = clearAt(x + nav.cell, y) - clearAt(x - nav.cell, y);
+      const gy = clearAt(x, y + nav.cell) - clearAt(x, y - nav.cell);
+      const len = Math.hypot(gx, gy);
+      if (!len) break;
+      v.x += (gx / len) * (step / 100);
+      v.z += (gy / len) * (step / 100);
+    }
+    return v;
   }
 
   /** 2D 객체의 도면 좌표 사각형(cm) — 회전은 축 정렬 바운딩으로 근사 */
@@ -364,7 +748,6 @@ const View3D = (() => {
       x0: Math.min(a.x0, r.x), x1: Math.max(a.x1, r.x + r.w),
       y0: Math.min(a.y0, r.y), y1: Math.max(a.y1, r.y + r.d),
     }), { x0: Infinity, x1: -Infinity, y0: Infinity, y1: -Infinity }) : null;
-    bedLane = findLane(units.map(rectOf));
 
     // N.S 카운터 + 데스크·의자
     const ns = objs.find((o) => o.meta.key === "nurse_station");
@@ -388,6 +771,10 @@ const View3D = (() => {
 
     // 문짝 (여닫이·양짝·미닫이·자동문)
     objs.filter((o) => o.meta.isDoor).forEach((o) => buildDoor(root, o));
+
+    // 드론 항로: 장애물 여유 지도 → 사람 동선을 따르는 지상 항로
+    buildNav(room, objs);
+    route = planRoute();
 
     return root;
   }
@@ -437,7 +824,14 @@ const View3D = (() => {
     if (kind === "top") {                     // 평면뷰: 바로 위에서 내려다봄
       camera.position.set(W / 2, Math.max(W, H) * 1.05, H / 2 + 0.01);
       controls.target.set(W / 2, 0, H / 2);
-    } else if (kind === "eye") {              // 눈높이: 병상 필드 앞 통로에 서서 병상 열을 바라봄
+    } else if (kind === "eye") {              // 눈높이: 사람이 다니는 통로에 서서 실내를 바라봄
+      if (route && route.length > 3) {        // 항로 시작점 = 출입구 안쪽 통로
+        const p = route[0], q = route[Math.min(route.length - 1, 12)];
+        camera.position.set(M(p.x), 1.6, M(p.y));
+        controls.target.set(M(q.x), 1.35, M(q.y));
+        controls.update();
+        return;
+      }
       const b = bedBounds;
       const cx = b ? M((b.x0 + b.x1) / 2) : W / 2;
       const zStand = b ? M(b.y1) + 1.6 : H - 1.2;
@@ -520,53 +914,123 @@ const View3D = (() => {
 
   /**
    * 비행 경로. 위치·주시점을 같은 파라미터 u로 읽는 두 개의 스플라인으로 만든다.
-   * ① 상공 270° 선회 → ② 하강 → ③ 병상 사이 통로를 눈높이로 통과 → ④ 재상승
-   * ③은 findLane이 찾은 '빈 보조통로'를 지난다. 통로를 못 찾으면 벽 높이(2.7m)
-   * 위를 스치는 저공 스윕으로 대체해, 카메라가 병상·벽을 뚫고 지나가지 않게 한다.
+   * ① 상공 270° 선회 → ② 출입구 상공으로 하강 → ③ 사람 동선 저공 비행 → ④ 재상승
+   *
+   * ③은 planRoute가 만든 '사람이 다니는 통로' 항로를 그대로 따르므로,
+   * 어느 지점에서도 벽·병상과 최소 560mm(통로가 넉넉하면 900mm) 이상 떨어진다. 항로를 만들 수
+   * 없는 도면(통로가 막혔거나 객체가 거의 없는 경우)은 벽 위 저공 스윕으로 대체한다.
+   *
+   * 구간(phase)마다 '시간 비중'을 주고 각 구간을 호 길이로 균등 분할해 점을 찍으므로,
+   * 스플라인을 파라미터로 균등하게 읽으면 구간 안에서 속도가 일정해진다.
    */
-  function dronePath() {
+  function dronePath(sec) {
     const W = M(lastRoom.width), H = M(lastRoom.height);
     const cx = W / 2, cz = H / 2, span = Math.max(W, H);
-    const b = bedBounds;
-    const pos = [], tgt = [];
-    const add = (p, t) => { pos.push(p); tgt.push(t); };
     const V = (x, y, z) => new THREE.Vector3(x, y, z);
     const center = () => V(cx, 0, cz);
+    const smooth = (s) => s * s * (3 - 2 * s);
+    const mix = (a, b, t) => new THREE.Vector3().lerpVectors(a, b, t);
+    const phases = [];
 
-    // ① 상공 선회 — 반경·고도를 서서히 줄이며 도면 전체를 270° 훑는다
-    const N = 10;
-    for (let i = 0; i <= N; i++) {
-      const u = i / N;
-      const a = Math.PI * 0.55 + u * Math.PI * 1.5;
-      const r = span * 0.95 * (1 - 0.32 * u);
-      add(V(cx + Math.cos(a) * r, span * 0.60 * (1 - 0.45 * u), cz + Math.sin(a) * r), center());
+    // 통로 항로(있으면) — 영상 길이에 맞춰 최대 속도를 넘지 않게 잘라 쓴다
+    const budgetCm = sec * NAV.SPEED * 100 * 0.46;
+    const ground = route && trimPoly(route, budgetCm);
+    let gp = null;
+    if (ground && ground.length > 1) {
+      const pm = ground.map((p) => ({ x: M(p.x), z: M(p.y) }));
+      const cum = [0];
+      for (let i = 1; i < pm.length; i++) {
+        cum.push(cum[i - 1] + Math.hypot(pm[i].x - pm[i - 1].x, pm[i].z - pm[i - 1].z));
+      }
+      const total = cum[cum.length - 1];
+      // 항로 위 거리 d(m) 지점의 좌표 (끝을 넘으면 진행 방향으로 연장)
+      gp = (d) => {
+        if (d <= 0) return pm[0];
+        if (d >= total) {
+          const a = pm[pm.length - 2], b = pm[pm.length - 1];
+          const seg = Math.hypot(b.x - a.x, b.z - a.z) || 1, e = d - total;
+          return { x: b.x + ((b.x - a.x) / seg) * e, z: b.z + ((b.z - a.z) / seg) * e };
+        }
+        let i = 1;
+        while (i < cum.length - 1 && cum[i] < d) i++;
+        const t = (d - cum[i - 1]) / Math.max(1e-6, cum[i] - cum[i - 1]);
+        return { x: pm[i - 1].x + (pm[i].x - pm[i - 1].x) * t,
+                 z: pm[i - 1].z + (pm[i].z - pm[i - 1].z) * t };
+      };
+      gp.total = total;
     }
 
-    if (bedLane) {
-      // ②③ 통로 진입 후 눈높이 통과 — 양옆으로 병상이 지나간다
-      const lz = M(bedLane.z);
-      const ax = M(bedLane.x0) + 0.6, bx = M(bedLane.x1) - 0.6;
-      // 선회가 끝난 쪽(우측 상공)에서 가까운 끝으로 들어간다
-      const [inX, outX] = pos[pos.length - 1].x > cx ? [bx, ax] : [ax, bx];
-      const d = Math.sign(outX - inX);
-      add(V(inX, span * 0.22, lz), V(inX + d * 3, 1.2, lz));      // 하강
-      add(V(inX, 1.65, lz), V(inX + d * 6, 1.35, lz));            // 통로 진입
-      add(V((inX + outX) / 2, 1.62, lz), V(outX, 1.35, lz));      // 통과
-      add(V(outX, 1.62, lz), V(outX + d * 6, 1.35, lz));          // 빠져나감
+    // 주시점은 '조금 앞'과 '멀리 앞'을 섞어 본다 — 모퉁이를 미리 돌아봐
+    // 벽을 정면으로 마주 보는 구간이 생기지 않는다.
+    const look = (d) => {
+      const a = gp(d + NAV.LOOK), b = gp(d + NAV.LOOK * 2.4);
+      return { x: a.x * 0.35 + b.x * 0.65, z: a.z * 0.35 + b.z * 0.65 };
+    };
+    const startPt = gp ? gp(0) : { x: cx, z: H * 0.85 };
+    // ① 상공 270° 선회 — 진입할 출입구 위에서 끝나도록 시작 각도를 잡는다
+    const endA = Math.atan2(startPt.z - cz, startPt.x - cx);
+    phases.push({ w: 0.30, at(s) {
+      const a = endA - Math.PI * 1.5 * (1 - s);
+      const r = span * (0.95 - 0.28 * s);
+      return { p: V(cx + Math.cos(a) * r, span * (0.60 - 0.26 * s), cz + Math.sin(a) * r),
+               t: center() };
+    } });
+    const orbitEnd = phases[0].at(1).p.clone();
+
+    if (gp) {
+      const look0 = look(0);
+      // ② 출입구 상공 → 통로 고도로 수직 하강 (지붕이 없으므로 그대로 내려앉는다)
+      phases.push({ w: 0.15, at(s) {
+        const e = smooth(s);
+        const xz = mix(V(orbitEnd.x, 0, orbitEnd.z), V(startPt.x, 0, startPt.z), Math.min(1, e * 1.4));
+        const y = orbitEnd.y + (NAV.EYE - orbitEnd.y) * (e * e);
+        return { p: V(xz.x, y, xz.z),
+                 t: mix(center(), V(look0.x, 1.35, look0.z), e) };
+      } });
+      // ③ 사람 동선 저공 비행 — 진행 방향 앞을 내다보며 통로 한가운데를 지난다
+      // 항로가 짧은 도면은 이 구간 비중을 줄여, 제자리에 가까운 느린 비행이 되지 않게 한다
+      phases.push({ w: 0.45 * Math.max(0.45, Math.min(1, (gp.total * 100) / budgetCm)), at(s) {
+        const d = s * gp.total;
+        const p = gp(d), t = look(d);
+        return { p: V(p.x, NAV.EYE, p.z), t: V(t.x, 1.35, t.z) };
+      } });
+      // ④ 재상승 — 통로 끝에서 떠올라 전체를 담고 끝낸다
+      const endP = gp(gp.total), endL = look(gp.total);
+      phases.push({ w: 0.10, at(s) {
+        const e = smooth(s);
+        const xz = mix(V(endP.x, 0, endP.z), V(W * 0.9, 0, H * 1.05), e * e);
+        return { p: V(xz.x, NAV.EYE + (span * 0.5 - NAV.EYE) * e, xz.z),
+                 t: mix(V(endL.x, 1.35, endL.z), center(), e) };
+      } });
     } else {
-      // 통로가 없으면 벽 위(2.7m) 저공 스윕 — 어디에도 부딪히지 않는다
+      // 항로를 못 만든 도면 — 벽 위(3.2m) 저공 스윕으로 어디에도 닿지 않게 지난다
+      const b = bedBounds;
       const fx = b ? M((b.x0 + b.x1) / 2) : cx;
       const zA = b ? M(b.y1) + 1.5 : H * 0.85, zB = b ? M(b.y0) - 1.5 : H * 0.15;
-      add(V(fx, span * 0.22, zA), V(fx, 0.8, cz));
-      add(V(fx, 3.4, zA), V(fx, 0.8, zB));
-      add(V(fx, 3.2, (zA + zB) / 2), V(fx, 0.8, zB));
-      add(V(fx, 3.2, zB), V(fx, 0.8, zB - (zA - zB) * 0.3));
+      phases.push({ w: 0.55, at(s) {
+        const e = smooth(s);
+        const y = orbitEnd.y + (3.3 - orbitEnd.y) * Math.min(1, e * 2.2);
+        return { p: V(fx, y, zA + (zB - zA) * e), t: V(fx, 0.8, zB + (zB - zA) * 0.25) };
+      } });
+      phases.push({ w: 0.15, at(s) {
+        const e = smooth(s);
+        return { p: V(fx + (W * 0.9 - fx) * e, 3.3 + (span * 0.5 - 3.3) * e, zB + (H * 1.05 - zB) * e),
+                 t: center() };
+      } });
     }
 
-    // ④ 재상승 — 다시 떠올라 전체를 담고 끝낸다
-    add(V(W * 0.92, span * 0.55, H * 1.10), center());
-
-    const curve = (pts) => new THREE.CatmullRomCurve3(pts, false, "catmullrom", 0.35);
+    // 구간별 시간 비중대로 점을 찍는다 (구간 안에서는 등간격 = 등속)
+    const N = 320, tot = phases.reduce((a, p) => a + p.w, 0);
+    const pos = [], tgt = [];
+    phases.forEach((ph, pi) => {
+      const n = Math.max(2, Math.round((N * ph.w) / tot));
+      for (let i = pi ? 1 : 0; i <= n; i++) {
+        const { p, t } = ph.at(i / n);
+        pos.push(p);
+        tgt.push(t);
+      }
+    });
+    const curve = (pts) => new THREE.CatmullRomCurve3(pts, false, "catmullrom", 0.15);
     return { pos: curve(pos), tgt: curve(tgt) };
   }
 
@@ -606,7 +1070,7 @@ const View3D = (() => {
     controls.enabled = false;
 
     const sec = Number(overlay.querySelector("#view3d-dur").value) || 10;
-    const path = dronePath();
+    const path = dronePath(sec);
     const chunks = [];
     const rec = new MediaRecorder(cv.captureStream(30), {
       mimeType: mime, videoBitsPerSecond: 12e6,
@@ -630,8 +1094,11 @@ const View3D = (() => {
     flight = {
       tick() {
         const u = Math.min(1, (performance.now() - t0) / (sec * 1000));
-        const e = u * u * (3 - 2 * u);          // 시작·끝을 부드럽게
+        // 시작·끝만 부드럽게 — 구간별 시간 비중은 그대로 두고 속도만 완만히 여닫는다
+        const e = u - (0.4 * Math.sin(2 * Math.PI * u)) / (2 * Math.PI);
         camera.position.copy(path.pos.getPoint(e));
+        // 스플라인이 모서리를 질러가더라도 벽·장비에 붙지 않게 마지막으로 밀어낸다
+        keepClear(camera.position, navMin * 0.98);
         camera.lookAt(path.tgt.getPoint(e));
         bar.textContent = `● 녹화 중 ${Math.round(u * 100)}% — ${w}×${h} · ${sec}초`;
         if (u >= 1) flight.finish();
