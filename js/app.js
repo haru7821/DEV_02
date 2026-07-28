@@ -393,6 +393,13 @@
       e.target.value = "";
     });
     on("btn-export-pdf", "click", exportPDF);
+    // 3D 보기: 현재 도면을 그대로 입체로 세워 보여주고 glTF/OBJ로 내보낸다
+    on("btn-view3d", "click", () => {
+      if (typeof View3D === "undefined" || typeof THREE === "undefined") {
+        return toast("3D 라이브러리를 불러오지 못했습니다. vendor/three 폴더를 확인하세요.", "error");
+      }
+      View3D.open();
+    });
 
     // 흑백 도면(청사진) 모드 토글
     let blueprintOn = false;

@@ -377,3 +377,38 @@ h3 + .edit-grid { margin-top: 2px; }
   white-space: pre-line;
 }
 #toast.info { background: #1565c0; }
+
+/* ───────── 3D 뷰어 오버레이 ───────── */
+#view3d-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: #eef1f4;
+  display: flex;
+  flex-direction: column;
+}
+#view3d-overlay[hidden] { display: none; }
+#view3d-bar {
+  height: 44px;
+  flex: 0 0 44px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  background: #263238;
+  color: #eceff1;
+  font-size: 13px;
+}
+#view3d-title { flex: 1; opacity: 0.85; }
+#view3d-bar button {
+  padding: 6px 12px;
+  border: 1px solid #546e7a;
+  border-radius: 5px;
+  background: #37474f;
+  color: #eceff1;
+  font-size: 12px;
+  cursor: pointer;
+}
+#view3d-bar button:hover { background: #455a64; }
+#view3d-bar #view3d-close { background: #b71c1c; border-color: #c62828; }
+#view3d-canvas { flex: 1; display: block; width: 100%; }

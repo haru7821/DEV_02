@@ -43,6 +43,7 @@
       <button id="btn-blueprint" title="흑백 건축 도면(청사진) 스타일로 전환합니다">도면 모드</button>
       <button id="btn-export-png" title="도면을 PNG 이미지로 저장합니다">PNG</button>
       <button id="btn-export-svg" title="도면을 SVG 벡터 파일로 저장합니다">SVG</button>
+      <button id="btn-view3d" title="도면을 3D로 세워 봅니다 (glTF/OBJ 내보내기 지원)">🧊 3D 보기</button>
       <button id="btn-export-pdf" class="primary">PDF 출력 (가로)</button>
     </div>
   </header>
@@ -186,9 +187,15 @@
   <!-- 스크립트 (의존 순서 주의) -->
   <!-- ?v= : 파일 갱신 시 브라우저가 옛 캐시를 쓰지 않도록 하는 버전 태그
        (HTML만 새로 받고 JS는 캐시된 옛 파일을 쓰면 버튼이 동작하지 않을 수 있음) -->
+  <!-- three.js : 3D 뷰어 + glTF/OBJ 내보내기 (오프라인 번들) -->
+  <script src="vendor/three/three.min.js"></script>
+  <script src="vendor/three/OrbitControls.js"></script>
+  <script src="vendor/three/GLTFExporter.js"></script>
+  <script src="vendor/three/OBJExporter.js"></script>
   <script src="js/assets.js?v=20260728f"></script>
   <script src="js/canvas.js?v=20260728f"></script>
   <script src="js/validation.js?v=20260728f"></script>
+  <script src="js/view3d.js?v=20260728f"></script>
   <script src="js/app.js?v=20260728f"></script>
 </body>
 </html>
