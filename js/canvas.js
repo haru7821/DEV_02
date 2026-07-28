@@ -1056,14 +1056,16 @@ const FloorCanvas = (() => {
     const techSide = pick(["left", "right"]); // 변형 포인트 ①: 서비스 존 방향
     const hasWT = chosen.includes("water_treatment");
     const hasIso = chosen.includes("isolation_room");
-    // 참고 도면 분석 ①: 외부 밴드는 위(청결: 코어·창고·린넨)에서
-    // 아래(오염: 기구세척·세탁·오물) 순으로 적층 — 오염 계열은 소음원인
-    // 정수실과 함께 하단 코너에 모여 청결 동선과 분리되고 외부 반출이 쉽다.
-    // 위(직원 지원·청결) → 아래(오염·설비) 순. 오염 계열이 정수실과 하단 코너에 모인다
+    // 후방 밴드 적층 순서 (값이 작을수록 위 = 환자 출입구에서 먼 쪽).
+    // 오염 계열(오물처리·세탁·기구세척)을 밴드 '상단 외곽 코너'에 모은다 —
+    // 환자 주 출입구(하단)와 대각으로 가장 멀고, 상단·측면 외벽에 바로 접해
+    // 오물 반출·물품 입고를 외부에서 곧바로 처리할 수 있는 서비스 코너가 된다.
+    // 그 아래로 청결(린넨·창고·코어) → 직원 지원(정비·교육·간호사실·상담·과장) →
+    // 최하단 정수실(소음원, 병상에서 최대 이격) 순으로 내려간다.
     const TECH_ORDER = {
-      office_room: -4, consult_room: -3, nurse_room: -2, training_room: -1,
-      core: 0, storage: 1, linen_room: 2, repair_room: 2.5,
-      clean_room: 3, laundry_room: 4, waste_room: 5,
+      waste_room: -6, laundry_room: -5, clean_room: -4,
+      linen_room: -3, storage: -2, core: -1,
+      repair_room: 0, training_room: 1, nurse_room: 2, consult_room: 3, office_room: 4,
     };
     const techKeys = chosen.filter((k) => TECH.includes(k) && k !== "water_treatment")
       .sort((a, b) => (TECH_ORDER[a] ?? 9) - (TECH_ORDER[b] ?? 9));
@@ -1149,19 +1151,20 @@ const FloorCanvas = (() => {
       ? { x0: fieldX1 - mainCw, x1: fieldX1 }   // 기술 밴드 반대편 가장자리
       : { x0: fieldX0, x1: fieldX0 + mainCw };
 
-    // ── 간호사실은 N.S 옆(상단 스트립)에 붙인다 ──
-    // 근무(스테이션) ↔ 탈의·휴게 이동을 짧게 하기 위한 배치. 상단 스트립
-    // (격리실 + N.S + 간호사실)을 빼고도 병상 모듈 3개 폭이 남을 때만 적용하고,
-    // 남지 않으면 기존처럼 후방 밴드 최상단에 둔다.
-    const nsW0 = 90 + Math.min(4, Math.ceil(stationSeats / 2)) * 172;
+    // ── 간호처치실은 N.S에 붙인다 (업로드 도면 27bed 구성) ──
+    // 처치·투약 준비는 스테이션 업무의 연장이므로 N.S와 벽을 공유하고,
+    // 간호사실(탈의·휴게)은 근무 공간이 아니므로 후방 밴드에 떨어져 있어도 된다.
+    // 상단 스트립(격리실 + N.S + 처치실)을 빼고도 병상 모듈 2개 폭이 남을 때만 적용.
+    const nsW0 = 60 + Math.min(4, Math.ceil(stationSeats / 2)) * MEDICAL_RULES.NS_DESK_PITCH_CM;
     const isoW0 = hasIso ? Math.max(bW("isolation_room"), moduleWidth + 60) : 0;
-    // 스트립에서 격리실·N.S를 뺀 뒤 병상 모듈 2개 폭을 남기고 간호사실에 줄 수 있는 폭
-    const nurseAvailW = Math.floor(
+    // 스트립에서 격리실·N.S를 뺀 뒤 병상 모듈 2개 폭을 남기고 처치실에 줄 수 있는 폭
+    const treatAvailW = Math.floor(
       ((fieldX1 - fieldX0) - (isoW0 ? isoW0 + 45 : 0) - (nsW0 + 45) - 45 - moduleWidth * 2) / 10) * 10;
-    const nurseStripW = (hasNS && chosen.includes("nurse_room") &&
-      !lockedHas("nurse_station") && !lockedHas("nurse_room") && nurseAvailW >= 200)
-      ? Math.min(bW("nurse_room"), nurseAvailW) : 0; // 폭이 부족하면 지정 폭보다 좁혀서라도 붙인다
-    const nurseInStrip = nurseStripW > 0;
+    const treatStripW = (hasNS && chosen.includes("treatment_room") &&
+      !lockedHas("nurse_station") && !lockedHas("treatment_room") && treatAvailW >= 200)
+      ? Math.min(bW("treatment_room"), treatAvailW) : 0; // 폭이 부족하면 좁혀서라도 붙인다
+    const treatInStrip = treatStripW > 0;
+    let serviceDoor = null; // 오물 반출·물품 입고용 외부 출입구 위치
     {
       const tx = techSide === "left" ? M : W - techBandW - M;
       // 열(column) 좌표: col 0 = 외벽 쪽, col 1 = 안쪽. 두 열 사이는 내부 복도.
@@ -1206,23 +1209,46 @@ const FloorCanvas = (() => {
       }
       // 나머지 후방 실은 정수실 위에서부터 아래→위로 적층하고,
       // 열이 차면 안쪽 열(col 1)로 넘어간다 — 두 열 사이는 내부 복도.
-      // 오염 계열(오물·세탁·세척)이 정수실과 하단 코너에 모이고,
-      // 청결·직원 계열(린넨·창고·코어·간호사실·상담·과장)이 위로 간다.
-      // ① 실을 열(column)에 미리 배분: 아래(오염)부터 col0 → 넘치면 col1
+      // 상단(오염: 오물·세탁·세척) → 중간(청결: 린넨·창고·코어) →
+      // 하단(직원 지원 + 정수실) 순으로 내려간다.
+      // ① 실을 열(column)에 미리 배분: 위(오염)부터 col0 → 넘치면 col1
       const colAvail = [wtTop - M, techCols > 1 ? H - patientBandH - M * 2 : 0];
+      // 실 누락 방지: 후방 실 높이 합이 열 용량을 넘으면 비례 축소해 전부 수용한다.
+      // (선택한 실이 조용히 사라지지 않도록 — 남는 높이는 아래 ②에서 재배분)
+      // 크기를 직접 지정한 실은 축소 대상에서 빼고, 자동 실만 비례 축소한다
+      const techCap = colAvail[0] + colAvail[1];
+      const fixedNeed = techKeys.filter((k) => userSize(k)).reduce((s, k) => s + sH(k), 0);
+      const flexNeed = techKeys.filter((k) => !userSize(k)).reduce((s, k) => s + sH(k), 0);
+      const flexCap = Math.max(0, techCap - fixedNeed);
+      const techFit = flexNeed > flexCap && flexCap > 0 ? flexCap / flexNeed : 1;
+      /** 후방 밴드 배치 높이 — 용량 초과 시 축소, 최소 1,500mm는 보장 */
+      const tH = (k) => (userSize(k) ? sH(k)
+        : Math.max(150, Math.round((sH(k) * techFit) / 10) * 10));
       const colRooms = [[], []];
       let ci = 0;
-      // 간호사실을 상단 스트립(N.S 옆)에 두는 경우 후방 밴드에서 제외한다 —
-      // 빠진 높이는 아래 ②단계에서 나머지 실에 재배분되어 빈 틈이 생기지 않는다
-      [...techKeys].reverse().filter((k) => !(nurseInStrip && k === "nurse_room"))
-        .forEach((key) => { // waste → … → office 순
-        const h = sH(key);
-        const used = colRooms[ci].reduce((s, r) => s + r.h, 0);
-        if (used + h > colAvail[ci] && ci < techCols - 1) ci += 1;
-        if (colRooms[ci].reduce((s, r) => s + r.h, 0) + h <= colAvail[ci]) {
-          colRooms[ci].push({ key, h, fixed: !!userSize(key) });
+      // 오물처리실은 2열 구성에서도 반드시 외벽 열(col 0) 최상단에 자리를 예약한다 —
+      // 상단 외벽 + 측면 외벽 두 면에 접하는 코너가 되어 오물 반출·물품 입고가
+      // 실내를 거치지 않고 외부에서 바로 이루어진다.
+      const reserveWaste = techCols > 1 && techKeys.includes("waste_room");
+      const wasteH = reserveWaste ? tH("waste_room") : 0;
+      // col 0의 가용 높이에서 예약분을 뺀 값 (col 1은 예약 없음)
+      const capOf = (c) => colAvail[c] - (c === 0 ? wasteH : 0);
+      [...techKeys].reverse().forEach((key) => { // office → … → waste 순 (아래→위)
+        if (reserveWaste && key === "waste_room") return; // 아래에서 col 0 최상단에 추가
+        const h = tH(key);
+        // 현재 열에 안 들어가면 다음 열로 넘긴다 (두 열 모두 안 되면 이번 구성에서 제외)
+        for (let c = ci; c < techCols; c++) {
+          if (colRooms[c].reduce((s, r) => s + r.h, 0) + h <= capOf(c)) {
+            colRooms[c].push({ key, h, fixed: !!userSize(key) });
+            ci = c;
+            return;
+          }
         }
       });
+      // 리스트 마지막 = 열의 최상단 (아래에서 위로 쌓기 때문)
+      if (reserveWaste) {
+        colRooms[0].push({ key: "waste_room", h: wasteH, fixed: !!userSize("waste_room") });
+      }
       // ② 각 열의 남는 높이를 실들에 배분해 '정확히' 채운다 — 틈·빈 공간 0.
       //    사용자가 크기를 지정한 실(fixed)은 그대로 두고 자동 실에만 배분하되,
       //    모든 실이 지정 크기라면 틈 방지가 우선이므로 전체에 배분한다.
@@ -1245,6 +1271,14 @@ const FloorCanvas = (() => {
             // 오물처리실: 미닫이문(벽면 중앙), 내부 복도 + 외벽 양방향 출구
             zones.push(wallDoor("sliding_door", c, ty, h));
             if (c === 0) zones.push(wallDoor("sliding_door", c, ty, h, { outer: true }));
+            // 상단 외벽에 접하면 반출입(서비스) 전용 문을 추가로 낸다 —
+            // 오물 반출·물품 입고가 실내를 거치지 않고 외부로 바로 연결된다
+            if (ty <= M + 15) {
+              const sx = colX(c) + Math.round(colW / 2);
+              addDoor("sliding_door", { anchor: { x: sx, y: ty }, roomSide: "top", silent: true });
+              zones.push({ x0: sx - 80, x1: sx + 80, y0: ty - 5, y1: ty + 110 });
+              serviceDoor = { x: sx, y: ty };
+            }
           } else {
             zones.push(wallDoor("swing_door", c, ty, h));
           }
@@ -1267,6 +1301,25 @@ const FloorCanvas = (() => {
       }
     }
 
+    // ── 반출입(서비스) 동선 표기: 오물처리실 ↔ 외부 ──
+    // 환자 주 출입구(하단)와 대각으로 분리된 상단 코너에서 오물 반출·물품 입고가
+    // 이루어짐을 화살표와 라벨로 명시한다 (청결/오염 동선 교차 방지)
+    if (serviceDoor) {
+      const out = new fabric.Triangle({
+        left: serviceDoor.x, top: serviceDoor.y - 55, width: 34, height: 44, angle: 180,
+        originX: "center", originY: "center",
+        fill: "rgba(109,76,65,0.7)", selectable: false, evented: false,
+      });
+      out.meta = { key: "annotation", label: "반출입 동선" };
+      canvas.add(out);
+      const t = new fabric.Text("반출입구 (오물 반출 · 물품 입고)", {
+        left: serviceDoor.x, top: serviceDoor.y - 100, fontSize: 20, fill: "#6D4C41",
+        originX: "center", selectable: false, evented: false,
+      });
+      t.meta = { key: "annotation", label: "반출입구" };
+      canvas.add(t);
+    }
+
     // ── 주 출입구: 주 동선 폭의 한가운데, 하단 외벽에 자동문 ──
     const entranceX = Math.round((corridor.x0 + corridor.x1) / 2);
     addDoor("auto_door", { anchor: { x: entranceX, y: H }, roomSide: "bottom", silent: true });
@@ -1279,8 +1332,10 @@ const FloorCanvas = (() => {
       // 끝 실과 후방 실 사이에 사람이 다닐 통로가 항상 남는다
       const bandX0 = techSide === "left" ? techBandW + M + DOOR_CLEAR : corridor.x1 + 10;
       const xMax = techSide === "left" ? corridor.x0 - 10 : W - techBandW - M - DOOR_CLEAR;
+      // 간호처치실이 N.S 옆 스트립으로 올라간 경우 환자 밴드에서는 제외한다
+      const bandKeys = patientKeys.filter((k) => !(treatInStrip && k === "treatment_room"));
       // techSide=right면 출입구(왼쪽)부터 채우므로 순서를 뒤집는다
-      const orderKeys = techSide === "left" ? [...patientKeys] : [...patientKeys].reverse();
+      const orderKeys = techSide === "left" ? [...bandKeys] : [...bandKeys].reverse();
       // 폭 부족 시 출입구에서 먼 실(조제·처치)부터 제외해 대기·탈의실을 보장
       const fitKeys = [...orderKeys];
       while (fitKeys.length &&
@@ -1391,31 +1446,31 @@ const FloorCanvas = (() => {
       eye.meta = { key: "annotation", label: "N.S 관찰 시야" };
       canvas.add(eye);
     }
-    // ── 간호사실(탈의·휴게): N.S 바로 옆에 붙여 근무↔휴게 동선을 짧게 ──
-    // 스트립 안쪽(병상 필드 쪽) 방향으로 N.S와 벽을 공유한다.
-    let nurseZone = null;
-    if (nurseInStrip && nsZone) {
-      const nrW = nurseStripW;
+    // ── 간호처치실: N.S 바로 옆에 붙여 처치·투약 동선을 스테이션과 직결 ──
+    // 스트립 안쪽(병상 필드 쪽) 방향으로 N.S와 벽을 공유한다 (27bed 도면 구성).
+    let treatZone = null;
+    if (treatInStrip && nsZone) {
+      const trW = treatStripW;
       // 스트립 높이(격리실·N.S 중 깊은 쪽)에 맞춰 아래 병상 밴드와 라인을 맞춘다
-      const nrH = Math.max(bH("nurse_room"), stripBottom - M);
-      // techSide=left → 스트립이 오른쪽 벽에 붙으므로 간호사실은 N.S 왼쪽
-      const nrX = techSide === "left" ? nsZone.left - nrW : nsZone.right;
-      if (nrX >= fieldX0 && nrX + nrW <= fieldX1 && !hitLocked(nrX, M, nrW, nrH)) {
-        addEquipment("nurse_room", { left: nrX, top: M, width: nrW, height: nrH, silent: true });
+      const trH = Math.max(bH("treatment_room"), stripBottom - M);
+      // techSide=left → 스트립이 오른쪽 벽에 붙으므로 처치실은 N.S 왼쪽
+      const trX = techSide === "left" ? nsZone.left - trW : nsZone.right;
+      if (trX >= fieldX0 && trX + trW <= fieldX1 && !hitLocked(trX, M, trW, trH)) {
+        addEquipment("treatment_room", { left: trX, top: M, width: trW, height: trH, silent: true });
         // 문은 아래쪽(병상 필드 = N.S 관찰 구역) 벽 중앙 — 스테이션과 바로 통한다
-        const ndx = nrX + Math.round(nrW / 2);
-        addDoor("swing_door", { anchor: { x: ndx, y: M + nrH }, roomSide: "bottom", silent: true });
-        populateRoom("nurse_room", nrX, M, nrW, nrH,
-          [{ x0: ndx - 70, x1: ndx + 70, y0: M + nrH - 110, y1: M + nrH + 5 }]);
-        nurseZone = { left: nrX, right: nrX + nrW, top: M, bottom: M + nrH };
-        stripBottom = Math.max(stripBottom, nurseZone.bottom);
+        const ndx = trX + Math.round(trW / 2);
+        addDoor("swing_door", { anchor: { x: ndx, y: M + trH }, roomSide: "bottom", silent: true });
+        populateRoom("treatment_room", trX, M, trW, trH,
+          [{ x0: ndx - 70, x1: ndx + 70, y0: M + trH - 110, y1: M + trH + 5 }]);
+        treatZone = { left: trX, right: trX + trW, top: M, bottom: M + trH };
+        stripBottom = Math.max(stripBottom, treatZone.bottom);
       }
     }
 
     // 스트립이 차지하고 남는 상단 폭 계산 → 모듈 2개 미만이면 밴드는 아래에서 시작
     const stripUsed = (isoZone ? isoZone.right - isoZone.left + 45 : 0) +
                       (nsZone ? nsZone.right - nsZone.left + 45 : 0) +
-                      (nurseZone ? nurseZone.right - nurseZone.left + 45 : 0);
+                      (treatZone ? treatZone.right - treatZone.left + 45 : 0);
     const bandsBelowStrip = stripBottom > 0 &&
       (fieldX1 - fieldX0) - stripUsed < moduleWidth * 2 + 40;
 
@@ -1433,7 +1488,7 @@ const FloorCanvas = (() => {
       let rx0 = fieldX0, rx1 = fieldX1;
       // 상단 스트립(격리실·N.S·간호사실)은 한쪽 벽에 붙어 이어지므로 하나의
       // 구간으로 합쳐서 잘라낸다 — 사이사이에 병상을 끼워 넣어 조각내지 않는다
-      const hit = [isoZone, nsZone, nurseZone]
+      const hit = [isoZone, nsZone, treatZone]
         .filter((z) => z && yBottom >= z.top - 40 && yTop <= z.bottom + 40);
       if (hit.length) {
         const left = Math.min(...hit.map((z) => z.left));

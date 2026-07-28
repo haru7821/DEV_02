@@ -68,7 +68,7 @@ const equipmentData = {
   },
   water_treatment: {
     label: "정수실 (Water Treatment)",
-    width: 425, height: 225,   // 25BED RO실 실측 4,255 × 2,250
+    width: 300, height: 500,   // 기본 3,000 × 5,000 (참고: 25BED RO실 실측 4,255 × 2,250)
     color: "#9C27B0",
     type: "infrastructure",
   },
