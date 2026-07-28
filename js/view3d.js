@@ -505,10 +505,14 @@ const View3D = (() => {
     const smooth = (s) => s * s * (3 - 2 * s);
     const phases = [];
 
+    // 절대 최저 고도 — 도면이 작아도 이보다 낮게 날지 않는다.
+    // 고도를 도면 크기에만 비례시키면 작은 도면에서 벽(2.7m) 아래로 내려가 벽을 뚫는다.
+    const FLOOR_Y = WALL_H + 1.2;
+
     // 통과 구간: 도면의 긴 축을 따라 가로지른다 — 진행 방향 앞에 건물이 오래 남아
     // 화면이 빈 배경으로 차지 않는다. 짧은 축 위치는 병상 필드에 맞춘다.
-    // 통과 고도는 도면 크기에 비례 — 벽(2.7m)보다 충분히 높으면서 실내가 한눈에 들어온다.
-    const SWEEP_Y = Math.max(WALL_H + 2.5, span * 0.3);
+    // 통과 고도는 도면 크기에 비례하되 최저 고도 아래로는 내려가지 않는다.
+    const SWEEP_Y = Math.max(FLOOR_Y + 0.8, span * 0.3);
     const b = bedBounds;
     const fx = b ? M((b.x0 + b.x1) / 2) : cx;
     const fz = b ? M((b.y0 + b.y1) / 2) : cz;
@@ -525,7 +529,7 @@ const View3D = (() => {
     phases.push({ w: 0.42, at(s) {
       const a = endA - Math.PI * 1.5 * (1 - s);
       const r = span * (0.95 - 0.28 * s);
-      return { p: V(cx + Math.cos(a) * r, span * (0.60 - 0.26 * s), cz + Math.sin(a) * r),
+      return { p: V(cx + Math.cos(a) * r, Math.max(FLOOR_Y, span * (0.60 - 0.26 * s)), cz + Math.sin(a) * r),
                t: center() };
     } });
     const orbitEnd = phases[0].at(1).p.clone();
@@ -543,9 +547,10 @@ const View3D = (() => {
     } });
 
     // ③ 재상승 — 다시 떠올라 전체를 담고 끝낸다
+    const endY = Math.max(SWEEP_Y, span * 0.5);
     phases.push({ w: 0.18, at(s) {
       const e = smooth(s);
-      return { p: V(B.x + (W * 0.9 - B.x) * e, SWEEP_Y + (span * 0.5 - SWEEP_Y) * e,
+      return { p: V(B.x + (W * 0.9 - B.x) * e, SWEEP_Y + (endY - SWEEP_Y) * e,
                     B.z + (H * 1.05 - B.z) * e),
                t: center() };
     } });
@@ -562,7 +567,7 @@ const View3D = (() => {
       }
     });
     const curve = (pts) => new THREE.CatmullRomCurve3(pts, false, "catmullrom", 0.15);
-    return { pos: curve(pos), tgt: curve(tgt) };
+    return { pos: curve(pos), tgt: curve(tgt), minY: FLOOR_Y };
   }
 
   /** 이 브라우저가 쓸 수 있는 영상 형식 — mp4(H.264) 우선, 없으면 webm */
@@ -628,6 +633,8 @@ const View3D = (() => {
         // 시작·끝만 부드럽게 — 구간별 시간 비중은 그대로 두고 속도만 완만히 여닫는다
         const e = u - (0.4 * Math.sin(2 * Math.PI * u)) / (2 * Math.PI);
         camera.position.copy(path.pos.getPoint(e));
+        // 스플라인이 제어점 사이에서 처지더라도 벽 위 고도는 반드시 지킨다
+        camera.position.y = Math.max(camera.position.y, path.minY);
         camera.lookAt(path.tgt.getPoint(e));
         bar.textContent = `● 녹화 중 ${Math.round(u * 100)}% — ${w}×${h} · ${sec}초`;
         if (u >= 1) flight.finish();
