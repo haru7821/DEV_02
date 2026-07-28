@@ -410,6 +410,18 @@ h3 + .edit-grid { margin-top: 2px; }
   cursor: pointer;
 }
 #view3d-bar button:hover { background: #455a64; }
+#view3d-bar select {
+  padding: 6px 6px;
+  border: 1px solid #546e7a;
+  border-radius: 5px;
+  background: #37474f;
+  color: #eceff1;
+  font-size: 12px;
+}
+#view3d-bar button:disabled,
+#view3d-bar select:disabled { opacity: 0.4; cursor: default; }
+#view3d-bar #view3d-mp4 { background: #00695c; border-color: #00897b; }
+#view3d-bar #view3d-mp4:hover:not(:disabled) { background: #00796b; }
 #view3d-bar #view3d-close { background: #b71c1c; border-color: #c62828; }
 #view3d-canvas { flex: 1; display: block; width: 100%; }
 

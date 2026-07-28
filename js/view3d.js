@@ -19,7 +19,9 @@ const View3D = (() => {
 
   let renderer = null, scene = null, camera = null, controls = null;
   let overlay = null, canvasEl = null, raf = null, lastRoom = null;
+  let flight = null;      // 드론 비행 녹화 진행 상태 (null이면 비행 중 아님)
   let bedBounds = null;   // 병상 필드 범위(cm) — 눈높이 카메라 기준점
+  let bedLane = null;     // 병상 밴드 사이 보조통로(cm) — 드론 눈높이 통과 경로
 
   /* ───────── 재질 (실사 렌더러로 내보낼 때 그대로 매핑된다) ───────── */
   const MAT = {};
@@ -86,6 +88,35 @@ const View3D = (() => {
         else box(group, x, y + s2, thick, e2 - s2, h - DOOR_H, mat, DOOR_H);
       });
     }
+  }
+
+  /**
+   * 병상 밴드 사이의 '빈 통로'를 찾는다 — 드론이 눈높이로 지나갈 길.
+   * 병상 유닛 사각형을 가로띠(z)로 투영해, 어느 유닛에도 걸리지 않는
+   * 가장 긴 구간의 중앙을 통로로 본다. 통로가 없으면 null.
+   * 반환: { z, x0, x1 } (cm) — z 높이의 가로 통로를 x0→x1로 지난다.
+   */
+  function findLane(rects) {
+    if (rects.length < 2) return null;
+    const y0 = Math.min(...rects.map((r) => r.y));
+    const y1 = Math.max(...rects.map((r) => r.y + r.d));
+    const STEP = 5, PAD = 25;              // 통로 폭은 좌우 250mm 여유까지 본다
+    let best = null, run = null;
+    for (let z = y0; z <= y1; z += STEP) {
+      const free = !rects.some((r) => z > r.y - PAD && z < r.y + r.d + PAD);
+      if (free) run = run ? { a: run.a, b: z } : { a: z, b: z };
+      else {
+        if (run && (!best || run.b - run.a > best.b - best.a)) best = run;
+        run = null;
+      }
+    }
+    if (run && (!best || run.b - run.a > best.b - best.a)) best = run;
+    if (!best || best.b - best.a < 90) return null;   // 900mm 미만이면 통로로 안 본다
+    return {
+      z: (best.a + best.b) / 2,
+      x0: Math.min(...rects.map((r) => r.x)),
+      x1: Math.max(...rects.map((r) => r.x + r.w)),
+    };
   }
 
   /** 2D 객체의 도면 좌표 사각형(cm) — 회전은 축 정렬 바운딩으로 근사 */
@@ -333,6 +364,7 @@ const View3D = (() => {
       x0: Math.min(a.x0, r.x), x1: Math.max(a.x1, r.x + r.w),
       y0: Math.min(a.y0, r.y), y1: Math.max(a.y1, r.y + r.d),
     }), { x0: Infinity, x1: -Infinity, y0: Infinity, y1: -Infinity }) : null;
+    bedLane = findLane(units.map(rectOf));
 
     // N.S 카운터 + 데스크·의자
     const ns = objs.find((o) => o.meta.key === "nurse_station");
@@ -371,6 +403,13 @@ const View3D = (() => {
         <button id="view3d-top">평면뷰</button>
         <button id="view3d-iso">조감뷰</button>
         <button id="view3d-eye">눈높이</button>
+        <select id="view3d-dur" title="영상 길이">
+          <option value="10" selected>10초</option>
+          <option value="15">15초</option>
+          <option value="25">25초</option>
+          <option value="40">40초</option>
+        </select>
+        <button id="view3d-mp4" title="드론 카메라로 전체 레이아웃을 돌아보는 영상 저장">🎬 영상 저장</button>
         <button id="view3d-glb">glTF(.glb) 저장</button>
         <button id="view3d-obj">OBJ 저장</button>
         <button id="view3d-png">화면 저장</button>
@@ -386,6 +425,7 @@ const View3D = (() => {
     overlay.querySelector("#view3d-glb").addEventListener("click", exportGLB);
     overlay.querySelector("#view3d-obj").addEventListener("click", exportOBJ);
     overlay.querySelector("#view3d-png").addEventListener("click", exportPNG);
+    overlay.querySelector("#view3d-mp4").addEventListener("click", recordFlight);
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && overlay && !overlay.hidden) close();
     });
@@ -453,6 +493,7 @@ const View3D = (() => {
   }
 
   function close() {
+    if (flight) flight.finish();     // 녹화 중이면 지금까지 찍힌 분량으로 마무리
     if (overlay) overlay.hidden = true;
     if (raf) { cancelAnimationFrame(raf); raf = null; }
   }
@@ -468,8 +509,140 @@ const View3D = (() => {
 
   function loop() {
     raf = requestAnimationFrame(loop);
-    if (controls) controls.update();
+    if (flight) flight.tick();
+    else if (controls) controls.update();
     if (renderer && scene && camera) renderer.render(scene, camera);
+  }
+
+  /* ───────── 드론 비행 영상 ─────────
+   * 카메라를 스플라인 경로로 움직이며 캔버스를 그대로 녹화한다.
+   * 외부 라이브러리·서버 없이 브라우저 표준(captureStream + MediaRecorder)만 쓴다. */
+
+  /**
+   * 비행 경로. 위치·주시점을 같은 파라미터 u로 읽는 두 개의 스플라인으로 만든다.
+   * ① 상공 270° 선회 → ② 하강 → ③ 병상 사이 통로를 눈높이로 통과 → ④ 재상승
+   * ③은 findLane이 찾은 '빈 보조통로'를 지난다. 통로를 못 찾으면 벽 높이(2.7m)
+   * 위를 스치는 저공 스윕으로 대체해, 카메라가 병상·벽을 뚫고 지나가지 않게 한다.
+   */
+  function dronePath() {
+    const W = M(lastRoom.width), H = M(lastRoom.height);
+    const cx = W / 2, cz = H / 2, span = Math.max(W, H);
+    const b = bedBounds;
+    const pos = [], tgt = [];
+    const add = (p, t) => { pos.push(p); tgt.push(t); };
+    const V = (x, y, z) => new THREE.Vector3(x, y, z);
+    const center = () => V(cx, 0, cz);
+
+    // ① 상공 선회 — 반경·고도를 서서히 줄이며 도면 전체를 270° 훑는다
+    const N = 10;
+    for (let i = 0; i <= N; i++) {
+      const u = i / N;
+      const a = Math.PI * 0.55 + u * Math.PI * 1.5;
+      const r = span * 0.95 * (1 - 0.32 * u);
+      add(V(cx + Math.cos(a) * r, span * 0.60 * (1 - 0.45 * u), cz + Math.sin(a) * r), center());
+    }
+
+    if (bedLane) {
+      // ②③ 통로 진입 후 눈높이 통과 — 양옆으로 병상이 지나간다
+      const lz = M(bedLane.z);
+      const ax = M(bedLane.x0) + 0.6, bx = M(bedLane.x1) - 0.6;
+      // 선회가 끝난 쪽(우측 상공)에서 가까운 끝으로 들어간다
+      const [inX, outX] = pos[pos.length - 1].x > cx ? [bx, ax] : [ax, bx];
+      const d = Math.sign(outX - inX);
+      add(V(inX, span * 0.22, lz), V(inX + d * 3, 1.2, lz));      // 하강
+      add(V(inX, 1.65, lz), V(inX + d * 6, 1.35, lz));            // 통로 진입
+      add(V((inX + outX) / 2, 1.62, lz), V(outX, 1.35, lz));      // 통과
+      add(V(outX, 1.62, lz), V(outX + d * 6, 1.35, lz));          // 빠져나감
+    } else {
+      // 통로가 없으면 벽 위(2.7m) 저공 스윕 — 어디에도 부딪히지 않는다
+      const fx = b ? M((b.x0 + b.x1) / 2) : cx;
+      const zA = b ? M(b.y1) + 1.5 : H * 0.85, zB = b ? M(b.y0) - 1.5 : H * 0.15;
+      add(V(fx, span * 0.22, zA), V(fx, 0.8, cz));
+      add(V(fx, 3.4, zA), V(fx, 0.8, zB));
+      add(V(fx, 3.2, (zA + zB) / 2), V(fx, 0.8, zB));
+      add(V(fx, 3.2, zB), V(fx, 0.8, zB - (zA - zB) * 0.3));
+    }
+
+    // ④ 재상승 — 다시 떠올라 전체를 담고 끝낸다
+    add(V(W * 0.92, span * 0.55, H * 1.10), center());
+
+    const curve = (pts) => new THREE.CatmullRomCurve3(pts, false, "catmullrom", 0.35);
+    return { pos: curve(pos), tgt: curve(tgt) };
+  }
+
+  /** 이 브라우저가 쓸 수 있는 영상 형식 — mp4(H.264) 우선, 없으면 webm */
+  function pickMime() {
+    if (!window.MediaRecorder) return "";
+    return [
+      "video/mp4;codecs=avc1.42E01E", "video/mp4;codecs=avc1", "video/mp4",
+      "video/webm;codecs=vp9", "video/webm",
+    ].find((m) => MediaRecorder.isTypeSupported(m)) || "";
+  }
+
+  function recordFlight() {
+    if (!renderer || !scene || !camera || !lastRoom || flight) return;
+    const cv = renderer.domElement;
+    if (!cv.captureStream || !window.MediaRecorder) {
+      alert("이 브라우저는 화면 녹화를 지원하지 않습니다.\nChrome·Edge 최신 버전에서 사용해 주세요.");
+      return;
+    }
+    const mime = pickMime();
+    if (!mime) { alert("녹화 가능한 영상 코덱이 없습니다."); return; }
+
+    const bar = overlay.querySelector("#view3d-title");
+    const barText = bar.textContent;
+    const ui = [...overlay.querySelectorAll("#view3d-bar button, #view3d-bar select")]
+      .filter((el) => el.id !== "view3d-close");
+    ui.forEach((el) => { el.disabled = true; });
+
+    // 녹화 해상도: 화면 크기 그대로, 픽셀비 1 (인코더를 위해 짝수로 맞춘다)
+    const oldPR = renderer.getPixelRatio();
+    const w = Math.floor(cv.clientWidth / 2) * 2;
+    const h = Math.floor(cv.clientHeight / 2) * 2;
+    renderer.setPixelRatio(1);
+    renderer.setSize(w, h, false);
+    camera.aspect = w / Math.max(1, h);
+    camera.updateProjectionMatrix();
+    controls.enabled = false;
+
+    const sec = Number(overlay.querySelector("#view3d-dur").value) || 10;
+    const path = dronePath();
+    const chunks = [];
+    const rec = new MediaRecorder(cv.captureStream(30), {
+      mimeType: mime, videoBitsPerSecond: 12e6,
+    });
+    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    rec.onstop = () => {
+      const ext = mime.startsWith("video/mp4") ? "mp4" : "webm";
+      if (chunks.length) {
+        download(new Blob(chunks, { type: mime }), `인공신장실_3D_비행_${stamp()}.${ext}`);
+      }
+      // 원상 복구
+      renderer.setPixelRatio(oldPR);
+      resize();
+      controls.enabled = true;
+      setView("iso");
+      bar.textContent = barText;
+      ui.forEach((el) => { el.disabled = false; });
+    };
+
+    const t0 = performance.now();
+    flight = {
+      tick() {
+        const u = Math.min(1, (performance.now() - t0) / (sec * 1000));
+        const e = u * u * (3 - 2 * u);          // 시작·끝을 부드럽게
+        camera.position.copy(path.pos.getPoint(e));
+        camera.lookAt(path.tgt.getPoint(e));
+        bar.textContent = `● 녹화 중 ${Math.round(u * 100)}% — ${w}×${h} · ${sec}초`;
+        if (u >= 1) flight.finish();
+      },
+      finish() {
+        if (!flight) return;
+        flight = null;
+        if (rec.state !== "inactive") rec.stop();
+      },
+    };
+    rec.start();
   }
 
   /* ───────── 내보내기 ───────── */
@@ -477,7 +650,9 @@ const View3D = (() => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = name;
+    document.body.appendChild(a);      // 문서에 붙여야 파일명이 확실히 적용된다
     a.click();
+    a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   const stamp = () => new Date().toISOString().slice(0, 10);
