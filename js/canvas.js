@@ -25,7 +25,7 @@ const FloorCanvas = (() => {
 
   const GRID_STEP = 50;       // 화면에 그리는 그리드 간격(cm)
   let WALL = 10;              // 벽 두께(cm) — setWallThickness()로 변경
-  let consoleDepth = 25;      // 배관 콘솔 두께(cm) — setConsoleDepth()로 변경
+  let consoleDepth = 60;      // 배관 콘솔 두께(cm) — 참고 도면 실측 640mm 기준
   let moduleWidth = 180;      // 병상 모듈 폭(cm): 침대+투석기 존 (참고 도면 1800mm 피치)
   let moduleDepth = 220;      // 병상 모듈 세로 길이(cm): 침대 길이 기준
   let stationSeats = 4;       // 간호 스테이션 좌석 수 (2인 데스크 단위, 최대 8석)
@@ -37,7 +37,7 @@ const FloorCanvas = (() => {
 
   /** 배관 콘솔 두께 설정(cm). 이후 추가/자동 배치되는 콘솔부터 적용된다. */
   function setConsoleDepth(t) {
-    consoleDepth = Math.min(60, Math.max(10, Math.round(+t) || 25));
+    consoleDepth = Math.min(80, Math.max(10, Math.round(+t) || 60));
   }
 
   /** 병상 모듈 폭 설정(cm). 침대(120cm)+투석기 존으로 구성되며 최소 175cm. */
