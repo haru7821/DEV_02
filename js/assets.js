@@ -24,7 +24,7 @@ const equipmentData = {
     type: "equipment",
     requiresWater: true,
   },
-  // ── 웹 조사 기반 실측 투석기 (제조사 기술자료의 바닥 점유 치수, cm) ──
+  // ── 제조사 기술자료의 바닥 점유 치수(cm) — 장비 선택용 ──
   fresenius_4008s: {
     label: "투석기 (Fresenius 4008S)",
     shortLabel: "4008S",
@@ -68,7 +68,7 @@ const equipmentData = {
   },
   water_treatment: {
     label: "정수실 (Water Treatment)",
-    width: 300, height: 400,
+    width: 425, height: 225,   // 25BED RO실 실측 4,255 × 2,250
     color: "#9C27B0",
     type: "infrastructure",
   },
@@ -77,7 +77,7 @@ const equipmentData = {
   nurse_station: {
     label: "Nurse Station (N.S)",
     shortLabel: "N.S",
-    width: 400, height: 250,   // 개방형 카운터 스테이션 (참고 도면 3.2~4.0m 폭)
+    width: 588, height: 350,   // 25BED N.S 카운터 실측 5,878 × 3,502
     color: "#FF9800",
     type: "room",
   },
@@ -108,7 +108,7 @@ const equipmentData = {
   },
   isolation_room: {
     label: "격리실 (감염관리)",
-    width: 400, height: 350,   // 1병상 격리 투석 베이 12m²+ (AusHFG 기준)
+    width: 400, height: 350,   // 27bed 격리실(중환자)·격리실 2실 구성 기준 (도면 치수 미기입)
     color: "#F44336",
     type: "room",
     isolation: true,
@@ -134,7 +134,7 @@ const equipmentData = {
   },
   linen_room: {
     label: "린넨실",
-    width: 200, height: 250,
+    width: 408, height: 225,   // 25BED 린넨실 실측 4,076 × 2,250
     color: "#A1887F",
     type: "room",
   },
@@ -168,16 +168,16 @@ const equipmentData = {
     color: "#B0BEC5",
     type: "room",
   },
-  // ── 실제 투석센터 프로그램에서 반복 확인되는 실 (웹 조사 반영) ──
+  // ── 업로드 도면(reference-plans/)에서 확인되는 부속실 ──
   repair_room: {
     label: "투석기 정비실",
-    width: 250, height: 250,   // 모듈러 투석센터 프로그램에 반복 등장 (BOXX·Odulair)
+    width: 250, height: 250,   // 27bed 「장비보관 등」·25BED 기계실 상당
     color: "#78909C",
     type: "room",
   },
   training_room: {
     label: "자가투석 교육실",
-    width: 350, height: 320,   // FGI: 자가투석 교육 구역 최소 120 sq ft(11.15m²)
+    width: 350, height: 320,   // 27bed 복막실/교육 공간 상당 (도면 치수 미기입)
     color: "#AED581",
     type: "room",
   },
@@ -303,7 +303,7 @@ const equipmentData = {
   station_desk2: {
     label: "간호 데스크 (2인 책상+의자)",
     shortLabel: "2인",
-    width: 160, height: 100,
+    width: 108, height: 80,   // 25BED N.S 카운터 5,878 ÷ 5조 = 1조당 1,180mm 피치
     color: "#F57C00",
     type: "furniture", category: "furn",
     symbol: "desk2",          // 책상 + 의자 2개 기호 (canvas.js)
@@ -402,19 +402,39 @@ const doorData = {
 };
 
 /**
- * 의료 규격 상수 (validation.js에서 사용)
- * 근거 (웹 조사):
- *  - 보건복지부·대한신장학회 「인공신장실 설치 및 운영 세부기준 권고안」:
- *    침상 간 이격 0.8m 이상, 병상 1개당 6m² 이상(간호사실·창고 등 제외한
- *    환자 점유 공간 기준), 격리실 1개 이상
- *  - 의료법 시행규칙 [별표4] 입원실: 병상 간 1.5m(신·증축) / 기존 시설 특례 1.0m
- *  - 해외 참고: FGI 4ft(122cm), AusHFG 투석 베이 9m²
- * 본 도구는 보수적으로 1.0m(의료법 특례 수준)를 기본값으로 사용한다.
+ * 기본 규격 상수 (validation.js·canvas.js에서 사용)
+ *
+ * 기준: 업로드된 실측 도면 `reference-plans/` 2장을 표준으로 삼는다.
+ *  - 25BED.png : 대동병원 인공신장실 25EA
+ *  - 27bed.png : 27병상 인공신장실
+ * 아래 값은 두 도면에 기입된 치수를 직접 읽어 정리한 것이며, 도면에 치수가
+ * 없는 항목만 국내 기준(보건복지부·대한신장학회 권고안)을 보조로 사용한다.
+ * 해외 기준(FGI·AusHFG·CDC 등)은 기준에서 제외했다.
+ *
+ * ── 도면 실측값 (mm) ──
+ *  병상 모듈 피치 : 1,800(27bed) · 1,500 / 1,520 / 1,600 / 1,700(25BED)
+ *  마주보는 병상 간 : 800(25BED)
+ *  배관 콘솔 두께 : 640(27bed)
+ *  병상 열 사이 통로 : 1,160 · 1,360(27bed) · 1,280 · 1,400(25BED)
+ *  중앙 로비(주 동선) : 3,370(25BED)
+ *  N.S 카운터 : 5,878 × 3,502 — 2인 데스크 5조(25BED)
+ *  RO실(정수실) 4,255 × 2,250 · 린넨실 4,076 × 2,250 · 기계실 3,970 × 3,075(25BED)
+ *  전면 부속실 블록 폭 : 3,980(27bed)
  */
 const MEDICAL_RULES = {
-  MIN_BED_GAP_CM: 100,      // 병상 간 최소 이격 (권고안 0.8m, 의료법 특례 1.0m → 1.0m 채택)
-  FOOT_WALL_CLEARANCE_CM: 80, // 침대 발쪽-벽 최소 이격 (800mm — 통행·처치 공간)
-  AREA_PER_BED_M2: 6,       // 병상당 최소 면적 (권고안 6m²)
+  // ── 검증 기준 ──
+  MIN_BED_GAP_CM: 80,       // 마주보는 병상 사이 최소 간격 (25BED 실측 800mm)
+  FOOT_WALL_CLEARANCE_CM: 80, // 침대 발쪽-벽 최소 이격 (도면 병상 열 앞 통로 최소치)
+  AREA_PER_BED_M2: 6,       // 병상당 최소 면적 — 도면에 없어 국내 권고안 6m² 사용
   MAX_PIPE_RUN_CM: 2500,    // 정수실 ↔ requiresWater 장비 최대 배관 동선 (25m)
-  BED_WALL_CLEARANCE_CM: 60 // 병상-벽 최소 여유 (자동 배치 시 참고)
+  BED_WALL_CLEARANCE_CM: 60,// 병상-벽 최소 여유 (자동 배치 시 참고)
+  // ── 도면 실측 기본 치수 (cm) ──
+  MODULE_PITCH_CM: 180,     // 병상 모듈 폭 = 침대+투석기 (27bed 1,800)
+  MODULE_DEPTH_CM: 220,     // 병상 모듈 길이 (침대 길이 기준)
+  CONSOLE_DEPTH_CM: 64,     // 배관 콘솔 두께 (27bed 640)
+  SUB_AISLE_CM: 130,        // 보조통로 기본 — 도면 1,160~1,400의 중앙값
+  MIN_AISLE_CM: 116,        // 통로 최소 (27bed 최소 실측 1,160)
+  MAIN_CORRIDOR_CM: 337,    // 주통로(중앙 로비) 기본 (25BED 3,370)
+  NS_DESK_PITCH_CM: 118,    // N.S 2인 데스크 1조 피치 (25BED 5,878 ÷ 5조)
+  NS_DEPTH_CM: 150,         // N.S 카운터 블록 깊이 (25BED 3,502은 전면 작업공간 포함)
 };

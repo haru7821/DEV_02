@@ -24,10 +24,11 @@ const FloorCanvas = (() => {
   let clipboard = null;       // 복사/붙여넣기 버퍼
 
   const GRID_STEP = 50;       // 화면에 그리는 그리드 간격(cm)
+  // 기본 치수는 업로드 실측 도면(reference-plans/) 기준값을 사용한다 — MEDICAL_RULES 참조
   let WALL = 10;              // 벽 두께(cm) — setWallThickness()로 변경
-  let consoleDepth = 60;      // 배관 콘솔 두께(cm) — 참고 도면 실측 640mm 기준
-  let moduleWidth = 180;      // 병상 모듈 폭(cm): 침대+투석기 존 (참고 도면 1800mm 피치)
-  let moduleDepth = 220;      // 병상 모듈 세로 길이(cm): 침대 길이 기준
+  let consoleDepth = MEDICAL_RULES.CONSOLE_DEPTH_CM; // 배관 콘솔 두께(cm) — 27bed 실측 640mm
+  let moduleWidth = MEDICAL_RULES.MODULE_PITCH_CM;   // 병상 모듈 폭(cm) — 27bed 실측 1,800mm
+  let moduleDepth = MEDICAL_RULES.MODULE_DEPTH_CM;   // 병상 모듈 세로 길이(cm): 침대 길이 기준
   let stationSeats = 4;       // 간호 스테이션 좌석 수 (2인 데스크 단위, 최대 8석)
 
   /** 벽 두께 설정(cm). 다음 새 도면/자동 배치부터 적용된다. */
@@ -37,17 +38,17 @@ const FloorCanvas = (() => {
 
   /** 배관 콘솔 두께 설정(cm). 이후 추가/자동 배치되는 콘솔부터 적용된다. */
   function setConsoleDepth(t) {
-    consoleDepth = Math.min(80, Math.max(10, Math.round(+t) || 60));
+    consoleDepth = Math.min(80, Math.max(10, Math.round(+t) || MEDICAL_RULES.CONSOLE_DEPTH_CM));
   }
 
   /** 병상 모듈 폭 설정(cm). 침대(120cm)+투석기 존으로 구성되며 최소 175cm. */
   function setModuleWidth(t) {
-    moduleWidth = Math.min(300, Math.max(175, Math.round(+t) || 180));
+    moduleWidth = Math.min(300, Math.max(150, Math.round(+t) || MEDICAL_RULES.MODULE_PITCH_CM));
   }
 
   /** 병상 모듈 세로 길이 설정(cm). 침대 길이 기준, 180~320cm. */
   function setModuleDepth(t) {
-    moduleDepth = Math.min(320, Math.max(180, Math.round(+t) || 220));
+    moduleDepth = Math.min(320, Math.max(170, Math.round(+t) || MEDICAL_RULES.MODULE_DEPTH_CM));
   }
 
   /** 간호 스테이션 좌석 수 설정 (2~8석, 2인 데스크 단위로 반올림). */
@@ -949,13 +950,12 @@ const FloorCanvas = (() => {
    * 유닛(stationSeats/2 조)을 배치한다. */
   function addStationIsland(x, y, seats) {
     // 데스크는 1열로 나란히 놓여 모두 병상(개방면)을 바라본다.
-    // 좌석 수만큼 가로로 길어지고, 뒤쪽에 직원 통행/작업 여유를 둔다.
+    // 25BED 도면의 N.S 카운터 실측 5,878mm에 2인 데스크 5조 → 1조당 피치 1,180mm.
     const desks = Math.min(4, Math.ceil((seats ?? stationSeats) / 2));
-    const perRow = desks;   // 1열 배치
-    const rows = 1;
+    const pitch = MEDICAL_RULES.NS_DESK_PITCH_CM;
     const bar = 40;         // 후면 카운터(수납) 깊이
-    const w = 90 + perRow * 172;
-    const h = bar + 35 + rows * 112;  // 후면 카운터 + 직원 통로 + 데스크 (병상 열 깊이 안에 들어감)
+    const w = 60 + desks * pitch;
+    const h = MEDICAL_RULES.NS_DEPTH_CM; // 카운터 블록 깊이 (25BED 3,502는 전면 작업공간 포함)
     const col = "#FF9800";
     const mk = (left, top, bw, bh) => new fabric.Rect({
       left, top, width: bw, height: bh, rx: 12, ry: 12,
@@ -976,7 +976,7 @@ const FloorCanvas = (() => {
     applyBlueprintToObject(grp);
     // 2인 데스크 유닛을 1열로 — 전원이 개방면(아래=병상)을 향해 착석
     for (let i = 0; i < desks; i++) {
-      addEquipment("station_desk2", { left: x + 52 + i * 172, top: y + bar + 30, silent: true });
+      addEquipment("station_desk2", { left: x + 42 + i * pitch, top: y + bar + 22, silent: true });
     }
     return { grp, w, h };
   }
@@ -1029,10 +1029,12 @@ const FloorCanvas = (() => {
     const M = 10;
 
     // ── 통로 폭 (사용자 지정, 별도 선택) ──
-    // 보조통로: 마주보는 병상 밴드 사이 간호 동선 (기본 1500mm, 최소 800mm)
-    const aisle = Math.min(400, Math.max(80, Math.round(opts.passage ?? 150)));
-    // 주통로: 출입구에서 필드 끝까지 이어지는 주 동선 (기본 2000mm, 최소 1200mm)
-    const mainCw = Math.min(500, Math.max(120, Math.round(opts.mainCorridor ?? 200)));
+    // 보조통로: 마주보는 병상 밴드 사이 간호 동선
+    // (기본 1,300mm = 27bed 1,160·1,360 / 25BED 1,280·1,400의 중앙값, 최소 800mm)
+    const aisle = Math.min(400, Math.max(80, Math.round(opts.passage ?? MEDICAL_RULES.SUB_AISLE_CM)));
+    // 주통로: 출입구에서 필드 끝까지 이어지는 주 동선 (기본 3,370mm = 25BED 중앙 로비 실측)
+    const mainCw = Math.min(600, Math.max(MEDICAL_RULES.MIN_AISLE_CM,
+      Math.round(opts.mainCorridor ?? MEDICAL_RULES.MAIN_CORRIDOR_CM)));
 
     // ── 실 크기: 사용자 지정(roomSizes) 우선, 없으면 기본 스펙 ──
     // shrink: 병상 '대수 우선' 배치 — 목표 대수가 안 들어가면 실 크기를
@@ -1515,16 +1517,15 @@ const FloorCanvas = (() => {
         bands.push({ consoleY: by + 3, above: [], below: single });
       }
     }
-    // ── 직원 손세정대: 병상 4대당 1개 (AusHFG 기준) ──
-    // 콘솔 라인 위, 병상 4개 간격마다 배치해 감염관리 동선을 짧게 유지한다
+    // ── 직원 손세정대: 병상 열(밴드)마다 콘솔 끝에 1개 ──
+    // 업로드 도면(25BED)에서 손세정대가 각 병상 클러스터 끝단에 놓인 구성을 따른다
     bands.forEach(({ consoleY, above, below }) => {
       const row = (above.length >= below.length ? above : below);
-      for (let i = 3; i < row.length; i += 4) {
-        const b = row[i];
-        addEquipment("washbasin", {
-          left: Math.round(b.left + b.width - 60), top: Math.round(consoleY - 48), silent: true,
-        });
-      }
+      if (!row.length) return;
+      const b = row[row.length - 1];
+      addEquipment("washbasin", {
+        left: Math.round(b.left + b.width - 60), top: Math.round(consoleY - 48), silent: true,
+      });
     });
 
     // 격리 병상 머리맡 콘솔

@@ -1,5 +1,9 @@
 /**
- * validation.js — 의료 규격 자동 검증
+ * validation.js — 기본 규격 자동 검증
+ *
+ * 기준값은 업로드 실측 도면(reference-plans/ 25BED.png · 27bed.png)에서 읽은
+ * 치수를 표준으로 하는 assets.js의 MEDICAL_RULES를 그대로 사용한다.
+ * (병상 간 800mm·콘솔 640mm·통로 1,160mm 등 — 해외 기준은 사용하지 않음)
  *
  * ① 병상 이격 거리: 모든 병상(침대/병상 유닛) 쌍의 "테두리 간 최단 거리"를
  *    Math.hypot()으로 계산해 기준(1m) 미만이면 빨간 테두리로 깜빡이며 경고.
@@ -36,7 +40,7 @@ const Validator = (() => {
   /* ───────── ① 병상 이격 거리 검증 ───────── */
   /**
    * 등맞댐(back-to-back) 예외: 두 병상 사이 간격 구역에 배관 콘솔이 있으면
-   * 머리맡이 콘솔로 분리된 정상 배치로 간주한다 (실제 도면의 800mm 백투백 구조).
+   * 머리맡이 콘솔로 분리된 정상 배치로 간주한다 (27bed의 640mm 콘솔 백투백 구조).
    */
   function consoleBetween(a, b, consoles) {
     const xOverlap = Math.min(a.right, b.right) - Math.max(a.left, b.left);
@@ -51,7 +55,7 @@ const Validator = (() => {
 
   /**
    * 모듈 밀착 예외: 병상 모듈(침대+장비 존)끼리 좌우로 붙여 배치한 경우
-   * (참고 도면의 1800mm 모듈 피치). 침대 사이는 모듈 내 장비 존이 분리한다.
+   * (27bed 도면의 1,800mm 모듈 피치). 침대 사이는 모듈 내 장비 존이 분리한다.
    */
   function moduleAdjacent(a, b, oa, ob) {
     if (oa.meta.key !== "bed_unit" || ob.meta.key !== "bed_unit") return false;
