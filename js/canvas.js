@@ -741,6 +741,47 @@ const FloorCanvas = (() => {
     return grp;
   }
 
+  /**
+   * 세로 콘솔용 병상 모듈 — 가로 모듈을 전치한 형태 (27bed 도면의 팟 구조).
+   * 머리맡이 좌/우를 향하고 콘솔이 세로로 지나간다.
+   * headLeft=true면 머리맡(콘솔)이 왼쪽. 투석기는 항상 환자 기준 오른쪽 =
+   * 머리가 왼쪽이면 화면 아래쪽, 머리가 오른쪽이면 화면 위쪽.
+   */
+  function addBedUnitV(x, y, isolated, headLeft) {
+    const mw = moduleWidth, md = moduleDepth; // mw = 병상 피치(세로), md = 침대 길이(가로)
+    const frame = new fabric.Rect({
+      left: x, top: y, width: md, height: mw,
+      fill: "rgba(96,125,139,0.05)",
+      stroke: "#90A4AE", strokeWidth: 1.5, strokeDashArray: [8, 6],
+    });
+    frame.meta = { key: "module_frame", label: "모듈 경계" };
+    canvas.add(frame);
+    const BED_W = 120, MACHINE_W = 50;   // 침대 폭 · 투석기 폭 (전치 시 세로 치수)
+    const gapIn = Math.max(3, Math.round((mw - BED_W - MACHINE_W) / 2));
+    const bedY = headLeft ? y : y + mw - BED_W;
+    const macY = headLeft ? y + mw - gapIn - MACHINE_W : y + gapIn;
+    const bed = addEquipment("dialysis_bed", {
+      left: x, top: bedY, width: md, height: BED_W, silent: true, inUnit: true,
+    });
+    const machine = addEquipment("dialysis_machine", {
+      left: headLeft ? x : x + md - 70, top: macY,
+      width: 70, height: MACHINE_W, silent: true,
+    });
+    const sel = new fabric.ActiveSelection([frame, bed, machine], { canvas });
+    const grp = sel.toGroup();
+    grp.meta = {
+      key: "bed_unit",
+      label: isolated ? "격리 병상 유닛" : "병상 유닛",
+      requiresWater: true, isolationCapable: true, isolated,
+      headDown: false,
+      vertical: true, headLeft,   // 발쪽이 좌/우 → 발-벽 이격은 가로 방향으로 검사
+      members: ["module_frame", "dialysis_bed", "dialysis_machine"],
+    };
+    assignBedNumber(grp);
+    canvas.requestRenderAll();
+    return grp;
+  }
+
   function drawPipeRuns(topBeds, bottomBeds, bottomRowY) {
     const wt = getObjects().find((o) => o.meta.key === "water_treatment");
     if (!wt || !topBeds.length) return;
@@ -1109,13 +1150,16 @@ const FloorCanvas = (() => {
     // 매번 다른 평면이 나온다. 어느 조합이든 규격·동선 규칙은 그대로 지켜진다.
     // 골격은 4비트 조합(16가지)으로 정의하고, 실행할 때마다 순환시켜
     // 연속으로 눌러도 같은 구성이 반복되지 않게 한다 (재귀 호출은 같은 조합 유지).
-    const vbits = opts._variant ?? (variantSeq = (variantSeq + 1) & 15);
-    const techSide = (vbits & 1) ? "left" : "right"; // ① 서비스 존(후방 밴드) 방향
-    const corridorSide = (vbits & 2) ? "far" : "near"; // ② 주 동선 위치
-    const wantTwoCols = !!(vbits & 4);               // ③ 후방 밴드 2열 구성 선호
+    const vbits = opts._variant ?? (variantSeq = (variantSeq + 1) & 31);
+    const techSide = (vbits & 2) ? "left" : "right"; // ② 서비스 존(후방 밴드) 방향
+    const corridorSide = (vbits & 4) ? "far" : "near"; // ③ 주 동선 위치
+    const wantTwoCols = !!(vbits & 8);               // ④ 후방 밴드 2열 구성 선호
     // ④ N.S 위치: 상단 스트립 | 병상 필드와 환자 밴드 사이의 '중앙 아일랜드'
     //    (25BED 도면형 — 카운터가 필드 한가운데서 모든 병상 열을 마주본다)
-    const nsIsland = !!(vbits & 8);
+    const nsIsland = !!(vbits & 16);
+    // ① 배관 콘솔 방향: 가로(콘솔이 좌우로 지남) | 세로(27bed 팟 구조)
+    //    최하위 비트라 실행할 때마다 가로·세로가 번갈아 나온다
+    const bandAxis = (vbits & 1) ? "v" : "h";
     const hasWT = chosen.includes("water_treatment");
     const hasIso = chosen.includes("isolation_room");
     // 후방 밴드 적층 순서 (값이 작을수록 위 = 환자 출입구에서 먼 쪽).
@@ -1768,8 +1812,76 @@ const FloorCanvas = (() => {
       ? aisle + Math.min(Math.round(aisle * 0.6),
           Math.floor(plan.waste / plan.gaps / 10) * 10)
       : aisle;
+    // ═══ 세로 콘솔 배치 (27bed 팟 구조) ═══
+    // 콘솔이 세로로 지나가고 좌우에 병상이 마주본다. 밴드는 좌→우로 반복되며
+    // 각 열의 병상은 위→아래로 쌓인다.
+    if (bandAxis === "v") {
+      const bandW = MD + CD + 6 + MD;              // 밴드 가로 폭
+      const colTop = by;                            // 병상 열 시작 y
+      const colBot = bandY1;                        // 끝 y
+      /** 세로 구간에서 스트립을 피한 y 범위 (가로로 겹치는 스트립만 잘라낸다) */
+      const vBounds = (xL, xR) => {
+        let ry0 = colTop, ry1 = colBot;
+        [isoZone, nsZone, ...stripZones]
+          .filter((z) => z && xR > z.left + 5 && xL < z.right - 5)
+          .forEach((z) => {
+            if (z.bottom < (colTop + colBot) / 2) ry0 = Math.max(ry0, z.bottom + 45);
+            else ry1 = Math.min(ry1, z.top - 45);
+          });
+        return { ry0, ry1 };
+      };
+      /** 한 열 채우기: 위→아래로 병상 유닛 배치 (격자 위상 공유) */
+      const gridY0 = colTop;
+      const fillCol = (xBed, headLeft) => {
+        const { ry0, ry1 } = vBounds(xBed, xBed + MD);
+        const col = [];
+        let y = gridY0 + Math.ceil((ry0 - gridY0 - 0.5) / MW) * MW;
+        while (y + MW <= ry1) {
+          const lz = hitLocked(xBed, y, MD, MW);
+          if (lz) { y = gridY0 + Math.ceil((lz.y1 + 5 - gridY0) / MW) * MW; continue; }
+          const grp = addBedUnitV(xBed, y, false, headLeft);
+          col.push(grp);
+          placedBeds.push({ grp, rowY: y });
+          y += MW;
+        }
+        return col;
+      };
+      /** 세로 콘솔 스트립: 두 열의 병상 구간을 합쳐 깐다 */
+      const layConsoleV = (cx, bedsLR) => {
+        if (!bedsLR.length) return;
+        const y0 = Math.min(...bedsLR.map((b) => b.top)) - 15;
+        const y1 = Math.max(...bedsLR.map((b) => b.top + b.height)) + 15;
+        addEquipment("bed_console", {
+          left: cx, top: y0, width: CD, height: y1 - y0, silent: true,
+        });
+      };
+      // 밴드 개수 계산 + 남는 폭을 통로에 배분 (죽은 공간 최소화)
+      // 양 끝 열의 '발쪽'이 벽·통로에 닿으므로 좌우로 발-벽 이격(800mm)을 확보한다
+      const FOOT = MEDICAL_RULES.FOOT_WALL_CLEARANCE_CM;
+      const availW = fieldX1 - fieldX0 - mainCwFit - FOOT * 2;
+      let nb = Math.max(0, Math.floor((availW + aisle) / (bandW + aisle)));
+      const gaps = Math.max(0, nb - 1);
+      const aisleV = gaps > 0
+        ? aisle + Math.min(Math.round(aisle * 0.6),
+            Math.floor((availW - nb * bandW - gaps * aisle) / gaps / 10) * 10)
+        : aisle;
+      // 주 동선을 피해 시작 x를 잡는다
+      let bx = (corridorAtRight ? fieldX0 : corridor.x1 + 10) + FOOT;
+      for (let i = 0; i < nb; i++) {
+        if (corridor && bx + bandW > corridor.x0 && bx < corridor.x1) bx = corridor.x1 + 10;
+        if (bx + bandW > fieldX1 - FOOT) break;
+        const left = fillCol(bx, false);                       // 왼쪽 열: 머리 오른쪽
+        const consoleX = bx + MD + 3;
+        const right = fillCol(bx + MD + CD + 6, true);         // 오른쪽 열: 머리 왼쪽
+        if (left.length || right.length) {
+          layConsoleV(consoleX, [...left, ...right]);
+          bands.push({ vertical: true, consoleX, above: left, below: right });
+        }
+        bx += bandW + aisleV;
+      }
+    }
     let madeBands = 0;
-    while (madeBands < plan.nb && by + MD + CD + MD <= bandY1) {
+    while (bandAxis === "h" && madeBands < plan.nb && by + MD + CD + MD <= bandY1) {
       // 양면 밴드: 위 행(머리 아래쪽) + 콘솔 + 아래 행(머리 위쪽).
       // 범위는 행마다 따로 계산한다 — 상단 스트립보다 아래에 있는 행은 스트립에
       // 막히지 않고 필드 전폭을 쓰므로 스트립 아래에 죽은 공간이 생기지 않는다.
@@ -1785,7 +1897,7 @@ const FloorCanvas = (() => {
       madeBands += 1;
     }
     // 계획된 단면(콘솔 위 머리↑) 행 추가 — 남는 높이를 마저 채운다
-    if ((plan.single || plan.nb === 0) && by + CD + MD <= bandY1) {
+    if (bandAxis === "h" && (plan.single || plan.nb === 0) && by + CD + MD <= bandY1) {
       const single = fillRow(by + CD + 6, false);
       if (single.length) {
         layConsole(by + 3, single);
@@ -1794,13 +1906,19 @@ const FloorCanvas = (() => {
     }
     // ── 직원 손세정대: 병상 열(밴드)마다 콘솔 끝에 1개 ──
     // 업로드 도면(25BED)에서 손세정대가 각 병상 클러스터 끝단에 놓인 구성을 따른다
-    bands.forEach(({ consoleY, above, below }) => {
+    bands.forEach(({ consoleY, consoleX, vertical, above, below }) => {
       const row = (above.length >= below.length ? above : below);
       if (!row.length) return;
       const b = row[row.length - 1];
-      addEquipment("washbasin", {
-        left: Math.round(b.left + b.width - 60), top: Math.round(consoleY - 48), silent: true,
-      });
+      if (vertical) { // 세로 콘솔: 열 끝단(아래쪽) 콘솔 옆에 설치
+        addEquipment("washbasin", {
+          left: Math.round(consoleX - 20), top: Math.round(b.top + b.height + 10), silent: true,
+        });
+      } else {
+        addEquipment("washbasin", {
+          left: Math.round(b.left + b.width - 60), top: Math.round(consoleY - 48), silent: true,
+        });
+      }
     });
 
     // 격리 병상 머리맡 콘솔
@@ -1889,9 +2007,31 @@ const FloorCanvas = (() => {
         dimLine("v", yc - aisle / 2, yc + aisle / 2, sx0 + 60, "#2E7D32");
       };
       // 밴드 사이 통로마다 + 환자 밴드 앞 가로 복도에 표시
-      bands.forEach((b) => {
+      bands.filter((b) => !b.vertical).forEach((b) => {
         const bandBottom = b.consoleY + CD + 3 + MD;
         if (bandBottom + 60 < fieldY1) subPath(Math.min(bandBottom + aisle / 2, fieldY1 - 40));
+      });
+      // 세로 콘솔 배치: 밴드 사이 '세로' 통로에 보조 동선을 표시한다
+      bands.filter((b) => b.vertical).forEach((b, i, arr) => {
+        if (i === arr.length - 1) return;
+        const xc = Math.round((b.consoleX + CD + MD + arr[i + 1].consoleX - MD) / 2);
+        const all = [...b.above, ...b.below];
+        if (!all.length) return;
+        const y0 = Math.min(...all.map((u) => u.top));
+        const y1 = Math.max(...all.map((u) => u.top + u.height));
+        const ln = new fabric.Line([xc, y0, xc, y1], {
+          stroke: "#2E7D32", strokeWidth: 3, strokeDashArray: [14, 10],
+          opacity: 0.8, selectable: false, evented: false,
+        });
+        ln.meta = { key: "annotation", label: "보조 동선" };
+        canvas.add(ln);
+        const t = new fabric.Text(`보조 동선 ${aisle * 10}`, {
+          left: xc, top: (y0 + y1) / 2, fontSize: 20, fill: "#2E7D32",
+          originX: "center", originY: "center", angle: 90,
+          selectable: false, evented: false,
+        });
+        t.meta = { key: "annotation" };
+        canvas.add(t);
       });
       subPath(fieldY1 + DOOR_CLEAR / 2); // 환자 밴드 문 앞 복도 (탈의실→병상 동선)
       // 문 앞 복도 치수: 환자 밴드 앞(가로 복도) · 후방 밴드 앞(세로 복도)
@@ -1936,8 +2076,28 @@ const FloorCanvas = (() => {
       });
       tapLabel.meta = { key: "annotation" };
       canvas.add(tapLabel);
-      bands.forEach(({ consoleY, above, below }) => {
+      // 세로 콘솔: 콘솔 안을 세로로 주행하고 좌우 병상으로 분기한다
+      bands.filter((b) => b.vertical).forEach(({ consoleX, above, below }) => {
         const all = [...above, ...below];
+        if (!all.length) return;
+        const y0 = Math.min(...all.map((b) => b.top)) - 10;
+        const y1 = Math.max(...all.map((b) => b.top + b.height)) + 10;
+        const inX = Math.round(consoleX + CD * 0.35), drX = Math.round(consoleX + CD * 0.7);
+        // 상단 가로 트렁크에서 콘솔 머리로 인입 후 세로 주행
+        addPipe([{ x: trunkX, y: y0 }, { x: inX, y: y0 }, { x: inX, y: y1 }], "inlet");
+        addPipe([{ x: trunkX, y: y0 + 14 }, { x: drX, y: y0 + 14 }, { x: drX, y: y1 }], "drain");
+        above.forEach((b) => { // 왼쪽 열: 콘솔에서 왼쪽으로 분기
+          const py = b.top + Math.round(b.height / 2);
+          addPipe([{ x: inX, y: py }, { x: b.left + b.width - 20, y: py }], "inlet");
+        });
+        below.forEach((b) => { // 오른쪽 열: 콘솔에서 오른쪽으로 분기
+          const py = b.top + Math.round(b.height / 2);
+          addPipe([{ x: inX, y: py }, { x: b.left + 20, y: py }], "inlet");
+        });
+      });
+      bands.filter((b) => !b.vertical).forEach(({ consoleY, above, below }) => {
+        const all = [...above, ...below];
+        if (!all.length) return;
         const farX = techSide === "left"
           ? Math.max(...all.map((b) => b.left + b.width))
           : Math.min(...all.map((b) => b.left));
@@ -1954,7 +2114,12 @@ const FloorCanvas = (() => {
         });
       });
       // 격리 병상 분기: 첫 밴드 주행선 끝에서 격리실 안까지 연장
-      if (isoBedGrp) {
+      if (isoBedGrp && bands[0] && bands[0].vertical) {
+        // 세로 콘솔 구성: 벽체 트렁크에서 격리실 안까지 직접 분기
+        const iy = isoBedGrp.top + Math.round(isoBedGrp.height / 2);
+        addPipe([{ x: trunkX, y: iy },
+                 { x: isoBedGrp.left + Math.round(isoBedGrp.width / 2), y: iy }], "inlet");
+      } else if (isoBedGrp && bands[0]) {
         const runY0 = inletYOf(bands[0].consoleY);
         const isoPx = isoBedGrp.left + Math.round((isoBedGrp.width + 120) / 2);
         const first = [...bands[0].above, ...bands[0].below];

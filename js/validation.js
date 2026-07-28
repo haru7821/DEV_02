@@ -43,14 +43,25 @@ const Validator = (() => {
    * 머리맡이 콘솔로 분리된 정상 배치로 간주한다 (27bed의 640mm 콘솔 백투백 구조).
    */
   function consoleBetween(a, b, consoles) {
+    // 가로 콘솔: 위아래로 마주본 병상 사이에 콘솔이 있는가
     const xOverlap = Math.min(a.right, b.right) - Math.max(a.left, b.left);
-    if (xOverlap <= 0) return false; // 좌우로 떨어진 병상은 해당 없음
-    const gapTop = Math.min(a.bottom, b.bottom);
-    const gapBottom = Math.max(a.top, b.top);
-    if (gapTop > gapBottom) return false;
-    return consoles.some((c) =>
-      c.top >= gapTop - 10 && c.bottom <= gapBottom + 10 &&
-      c.right > Math.max(a.left, b.left) && c.left < Math.min(a.right, b.right));
+    if (xOverlap > 0) {
+      const gapTop = Math.min(a.bottom, b.bottom);
+      const gapBottom = Math.max(a.top, b.top);
+      if (gapTop <= gapBottom && consoles.some((c) =>
+        c.top >= gapTop - 10 && c.bottom <= gapBottom + 10 &&
+        c.right > Math.max(a.left, b.left) && c.left < Math.min(a.right, b.right))) return true;
+    }
+    // 세로 콘솔: 좌우로 마주본 병상 사이에 콘솔이 있는가 (27bed 팟 구조)
+    const yOverlap = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+    if (yOverlap > 0) {
+      const gapLeft = Math.min(a.right, b.right);
+      const gapRight = Math.max(a.left, b.left);
+      if (gapLeft <= gapRight && consoles.some((c) =>
+        c.left >= gapLeft - 10 && c.right <= gapRight + 10 &&
+        c.bottom > Math.max(a.top, b.top) && c.top < Math.min(a.bottom, b.bottom))) return true;
+    }
+    return false;
   }
 
   /**
@@ -59,10 +70,13 @@ const Validator = (() => {
    */
   function moduleAdjacent(a, b, oa, ob) {
     if (oa.meta.key !== "bed_unit" || ob.meta.key !== "bed_unit") return false;
+    // 가로 콘솔 배치: 같은 행에서 좌우로 붙은 모듈
     const yOverlap = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
-    if (yOverlap < 100) return false; // 같은 행에서 나란히 붙은 경우만
-    const dx = Math.max(0, a.left - b.right, b.left - a.right);
-    return dx <= 10;
+    if (yOverlap >= 100 && Math.max(0, a.left - b.right, b.left - a.right) <= 10) return true;
+    // 세로 콘솔 배치: 같은 열에서 위아래로 붙은 모듈 (전치 구조)
+    const xOverlap = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+    if (xOverlap >= 100 && Math.max(0, a.top - b.bottom, b.top - a.bottom) <= 10) return true;
+    return false;
   }
 
   function checkBedSpacing(objects) {
@@ -129,6 +143,27 @@ const Validator = (() => {
     objects.filter((o) => o.meta.key === "bed_unit").forEach((b) => {
       const r = bbox(b);
       let footGap;
+      if (b.meta.vertical) {        // 세로 배치: 발쪽이 좌/우 (머리 반대편)
+        if (b.meta.headLeft) {      // 머리 왼쪽 → 발쪽 오른쪽
+          footGap = room.width - r.right;
+          walls.forEach((w) => {
+            if (w.bottom > r.top && w.top < r.bottom && w.left >= r.right - 5) {
+              footGap = Math.min(footGap, w.left - r.right);
+            }
+          });
+        } else {                    // 머리 오른쪽 → 발쪽 왼쪽
+          footGap = r.left;
+          walls.forEach((w) => {
+            if (w.bottom > r.top && w.top < r.bottom && w.right <= r.left + 5) {
+              footGap = Math.min(footGap, r.left - w.right);
+            }
+          });
+        }
+        if (footGap < min) {
+          bad.push({ msg: `「${b.meta.name ?? b.meta.label}」 발쪽-벽 이격 ${Math.round(footGap * 10)}mm < 기준 ${min * 10}mm`, targets: [b] });
+        }
+        return;
+      }
       if (b.meta.headDown) { // 발쪽 = 위
         footGap = r.top; // 상단 외벽까지
         walls.forEach((w) => {
