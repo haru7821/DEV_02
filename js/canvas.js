@@ -506,13 +506,16 @@ const FloorCanvas = (() => {
    * 건축 도면 기호로 렌더링. 가로 방향(문 폭 = x축)으로 그리고
    * 사용자가 회전(angle)으로 벽에 맞춘다. */
   function addDoor(key, opts = {}) {
-    const spec = doorData[key];
-    if (!spec) return null;
+    const spec0 = doorData[key];
+    if (!spec0) return null;
+    // opts.width로 문 폭 재정의 가능 (예: 정수실 장비 반입용 1000mm)
+    const spec = opts.width ? { ...spec0, width: Math.round(opts.width) } : spec0;
+    const DW = spec.width;
 
     // 공통: 개구부(벽 절개) 표현 — 흰색 바탕 사각형
     const parts = [
       new fabric.Rect({
-        left: 0, top: -7, width: spec.width, height: 14,
+        left: 0, top: -7, width: DW, height: 14,
         fill: "#ffffff", stroke: "#90a4ae", strokeWidth: 1,
       }),
     ];
@@ -525,37 +528,40 @@ const FloorCanvas = (() => {
       });
 
     if (key === "swing_door") {
-      // 경첩 (0,0), 문짝 + 1/4 원호 개폐 궤적
-      parts.push(leaf([0, 0, 0, -90]));
-      parts.push(arc("M 0 -90 A 90 90 0 0 1 90 0"));
+      // 경첩 (0,0). 문짝이 열리면 벽면(개구부 옆 벽)에 거의 붙도록
+      // 문짝을 벽과 나란한 방향으로 그리고, 90° 개폐 궤적을 표시한다.
+      parts.push(leaf([0, 0, DW * 0.06, -DW]));
+      parts.push(arc(`M ${DW * 0.06} ${-DW} A ${DW} ${DW} 0 0 1 ${DW} 0`));
     } else if (key === "double_swing_door") {
-      // 좌(경첩 x=0)·우(경첩 x=180) 대칭 두 짝
-      parts.push(leaf([0, 0, 0, -90]));
-      parts.push(arc("M 0 -90 A 90 90 0 0 1 90 0"));
-      parts.push(leaf([180, 0, 180, -90]));
-      parts.push(arc("M 180 -90 A 90 90 0 0 0 90 0"));
+      // 좌우 대칭 두 짝 — 각각 자기 쪽 벽면으로 열린다
+      const hw = DW / 2;
+      parts.push(leaf([0, 0, hw * 0.06, -hw]));
+      parts.push(arc(`M ${hw * 0.06} ${-hw} A ${hw} ${hw} 0 0 1 ${hw} 0`));
+      parts.push(leaf([DW, 0, DW - hw * 0.06, -hw]));
+      parts.push(arc(`M ${DW - hw * 0.06} ${-hw} A ${hw} ${hw} 0 0 0 ${hw} 0`));
     } else if (key === "auto_door") {
-      // 슬라이딩 패널 2장 + AUTO 표기
+      // 슬라이딩 패널 2장(양쪽 벽 속으로 열림) + AUTO 표기
+      const pw = DW / 2 - 4;
       parts.push(new fabric.Rect({
-        left: 2, top: -4, width: 86, height: 8,
+        left: 2, top: -4, width: pw, height: 8,
         fill: "#B3E5FC", stroke: spec.color, strokeWidth: 2,
       }));
       parts.push(new fabric.Rect({
-        left: 92, top: -4, width: 86, height: 8,
+        left: DW / 2 + 2, top: -4, width: pw, height: 8,
         fill: "#B3E5FC", stroke: spec.color, strokeWidth: 2,
       }));
       parts.push(new fabric.Text("AUTO", {
         fontSize: 16, fill: spec.color,
-        originX: "center", left: 90, top: -26,
+        originX: "center", left: DW / 2, top: -26,
       }));
     } else if (key === "sliding_door") {
-      // 미닫이: 패널 + 겹침 패널
+      // 미닫이: 문짝이 옆 벽면을 따라 밀려 열린다 (개구부 + 후퇴 패널)
       parts.push(new fabric.Rect({
-        left: 0, top: -10, width: 72, height: 8,
+        left: 0, top: -10, width: DW * 0.6, height: 8,
         fill: "#CFD8DC", stroke: spec.color, strokeWidth: 2,
       }));
       parts.push(new fabric.Rect({
-        left: 54, top: 2, width: 66, height: 8,
+        left: DW * 0.45, top: 2, width: DW * 0.55, height: 8,
         fill: "#ECEFF1", stroke: spec.color, strokeWidth: 2,
       }));
     }
@@ -856,6 +862,34 @@ const FloorCanvas = (() => {
     }
   }
 
+  /* ───────────────── 치수선 (통로 폭 등) ─────────────────
+   * axis "h": (a,b)는 x좌표, pos는 y좌표 / "v": (a,b)는 y좌표, pos는 x좌표
+   * 건축 도면처럼 양끝 짧은 보조선 + 화살표 + mm 치수 텍스트를 그린다. */
+  function dimLine(axis, a, b, pos, color = "#455A64") {
+    const len = Math.abs(b - a);
+    if (len < 40) return;
+    const add = (o) => { o.meta = { key: "annotation", label: "치수" }; canvas.add(o); };
+    const horiz = axis === "h";
+    add(new fabric.Line(horiz ? [a, pos, b, pos] : [pos, a, pos, b], {
+      stroke: color, strokeWidth: 1.5, selectable: false, evented: false,
+    }));
+    // 양끝 보조선(연장선)
+    [a, b].forEach((p) => add(new fabric.Line(
+      horiz ? [p, pos - 12, p, pos + 12] : [pos - 12, p, pos + 12, p],
+      { stroke: color, strokeWidth: 1.5, selectable: false, evented: false })));
+    // 양끝 화살표
+    [[a, horiz ? 90 : 180], [b, horiz ? 270 : 0]].forEach(([p, ang]) => add(new fabric.Triangle({
+      left: horiz ? p : pos, top: horiz ? pos : p, width: 14, height: 16, angle: ang,
+      originX: "center", originY: "center", fill: color, selectable: false, evented: false,
+    })));
+    add(new fabric.Text(String(Math.round(len * 10)), {
+      left: horiz ? (a + b) / 2 : pos + 8, top: horiz ? pos - 26 : (a + b) / 2,
+      fontSize: 20, fill: color,
+      originX: horiz ? "center" : "left", originY: horiz ? "top" : "center",
+      selectable: false, evented: false,
+    }));
+  }
+
   /* ───────────────── N.S 아일랜드 (U자형 개방 카운터) ─────────────────
    * 참고 도면의 간호 스테이션: 병상 필드 안에 독립 배치된 U자 카운터로,
    * 개방면이 병상 쪽을 향해 모든 병상 열을 관찰한다. 내부에 2인 데스크
@@ -1004,22 +1038,28 @@ const FloorCanvas = (() => {
       const colX = (c) => techSide === "left"
         ? tx + c * (colW + TECH_AISLE)
         : tx + techBandW - colW - c * (colW + TECH_AISLE);
-      // 문 앵커 보정: angle 90은 앵커 기준 왼쪽·아래로, angle 270은 오른쪽·위로
-      // 그려진다(fabric 실측). 스윙 범위가 자기 실 내부에 머물도록 보정한다.
-      // 각 실의 문은 자기 열에서 복도(또는 병상 필드) 쪽 변에 단다.
-      const innerDoor = (c, ty) => techSide === "left"
-        ? addDoor("swing_door", { left: colX(c) + colW + 14, top: ty + 40, angle: 90, silent: true })
-        : addDoor("swing_door", { left: colX(c) - 7, top: ty + 130, angle: 270, silent: true });
-      const outerDoor = (ty) => techSide === "left"
-        ? addDoor("swing_door", { left: colX(0) - 7, top: ty + 130, angle: 270, silent: true })
-        : addDoor("swing_door", { left: colX(0) + colW + 7, top: ty + 40, angle: 90, silent: true });
-      // 문 개폐 구역(오브젝트 배치 금지): 안쪽 문/바깥쪽 문 스윙 범위
-      const innerDoorZone = (c, ty) => techSide === "left"
-        ? { x0: colX(c) + colW - 95, x1: colX(c) + colW + 5, y0: ty + 30, y1: ty + 140 }
-        : { x0: colX(c) - 5, x1: colX(c) + 100, y0: ty + 30, y1: ty + 140 };
-      const outerDoorZone = (ty) => techSide === "left"
-        ? { x0: colX(0) - 5, x1: colX(0) + 100, y0: ty + 30, y1: ty + 140 }
-        : { x0: colX(0) + colW - 95, x1: colX(0) + colW + 5, y0: ty + 30, y1: ty + 140 };
+      /**
+       * 후방 밴드 실의 벽면 문 — 벽 길이의 중앙에 단다.
+       * kind : 문 종류, c : 열 번호, ty/h : 실의 세로 위치·높이
+       * opts.outer : true면 외벽 쪽 변, 기본은 복도(또는 병상 필드) 쪽 변
+       * opts.width : 문 폭(cm) 재정의 — 예) 정수실 장비 반입용 1000mm
+       * 반환값은 문 앞 금지 구역(오브젝트 배치 회피용)
+       *
+       * 문 앵커 보정: angle 90은 앵커 기준 왼쪽·아래로, 270은 오른쪽·위로
+       * 그려진다(fabric 실측). 그래서 오른쪽 변은 90°, 왼쪽 변은 270°를 쓴다.
+       */
+      const wallDoor = (kind, c, ty, h, opts = {}) => {
+        const dl = opts.width ?? doorData[kind].width;
+        const cy = ty + Math.round((h - dl) / 2);           // 벽면 세로 중앙
+        const innerIsRight = techSide === "left";           // 복도 쪽이 오른쪽 변인가
+        const onRight = opts.outer ? !innerIsRight : innerIsRight;
+        const edge = onRight ? colX(c) + colW : colX(c);
+        if (onRight) addDoor(kind, { left: edge + 14, top: cy, angle: 90, width: opts.width, silent: true });
+        else addDoor(kind, { left: edge - 7, top: cy + dl, angle: 270, width: opts.width, silent: true });
+        return onRight
+          ? { x0: edge - 100, x1: edge + 5, y0: cy - 10, y1: cy + dl + 10 }
+          : { x0: edge - 5, x1: edge + 100, y0: cy - 10, y1: cy + dl + 10 };
+      };
 
       // 정수실: 외벽 열(col 0) 맨 아래 — 환자에게서 가장 먼 코너
       let wtTop = H - patientBandH - M - 10;
@@ -1027,8 +1067,9 @@ const FloorCanvas = (() => {
         const wtH = sdim(equipmentData.water_treatment.height);
         wtTop = H - patientBandH - M - 10 - wtH;
         addEquipment("water_treatment", { left: colX(0), top: wtTop, width: colW, height: wtH, silent: true });
-        innerDoor(0, wtTop);
-        populateRoom("water_treatment", colX(0), wtTop, colW, wtH, [innerDoorZone(0, wtTop)]);
+        // 정수실 문: 탱크·RO 반입을 위해 1000mm 폭, 벽면 중앙
+        const wtZone = wallDoor("swing_door", 0, wtTop, wtH, { width: 100 });
+        populateRoom("water_treatment", colX(0), wtTop, colW, wtH, [wtZone]);
       }
       // 나머지 후방 실은 정수실 위에서부터 아래→위로 적층하고,
       // 열이 차면 안쪽 열(col 1)로 넘어간다 — 두 열 사이는 내부 복도.
@@ -1043,13 +1084,14 @@ const FloorCanvas = (() => {
         colTops[c] -= h;
         const ty2 = colTops[c];
         addEquipment(key, { left: colX(c), top: ty2, width: colW, height: h, silent: true });
-        innerDoor(c, ty2);
-        // 조건 ⑥: 오물처리실은 내부(복도) + 외부(외벽) 양방향 출구
-        const zones = [innerDoorZone(c, ty2)];
-        if (key === "waste_room" && c === 0) {
-          const oy = ty2 + Math.min(120, h - 130);
-          outerDoor(oy);
-          zones.push(outerDoorZone(oy));
+        const zones = [];
+        if (key === "waste_room") {
+          // 오물처리실: 카트 반출이 잦아 미닫이문을 쓰고 벽면 중앙에 단다.
+          // 내부(복도) 측 + 외벽 측 양방향 출구 (조건 ⑥)
+          zones.push(wallDoor("sliding_door", c, ty2, h));
+          if (c === 0) zones.push(wallDoor("sliding_door", c, ty2, h, { outer: true }));
+        } else {
+          zones.push(wallDoor("swing_door", c, ty2, h));
         }
         populateRoom(key, colX(c), ty2, colW, h, zones); // 실별 기본 오브젝트 (문 앞 회피)
         colTops[c] -= 10;
@@ -1065,6 +1107,8 @@ const FloorCanvas = (() => {
         });
         zone.meta = { key: "annotation", label: "후방 복도" };
         canvas.add(zone);
+        // 후방 복도 폭 치수
+        dimLine("h", zx, zx + TECH_AISLE - 4, M + 70, "#616161");
       }
     }
 
@@ -1276,12 +1320,14 @@ const FloorCanvas = (() => {
         tri.meta = { key: "annotation" };
         canvas.add(tri);
       }
-      const label = new fabric.Text("주 동선", {
+      const label = new fabric.Text(`주 동선 ${(corridor.x1 - corridor.x0) * 10}`, {
         left: cc, top: H - patientBandH - M - 45, fontSize: 26, fill: "#F57F17",
         originX: "center", selectable: false, evented: false,
       });
       label.meta = { key: "annotation" };
       canvas.add(label);
+      // 통로 폭 치수선 (양끝 화살표 + mm 표기)
+      dimLine("h", corridor.x0, corridor.x1, zoneTop + 40, "#F57F17");
     }
 
     // ── 보조 동선: 주 동선에서 각 병상 통로로 이어지는 간호(치료) 이동로 ──
@@ -1305,12 +1351,14 @@ const FloorCanvas = (() => {
           tri.meta = { key: "annotation" };
           canvas.add(tri);
         });
-        const t = new fabric.Text("보조 동선", {
+        const t = new fabric.Text(`보조 동선 ${aisle * 10}`, {
           left: (sx0 + sx1) / 2, top: yc - 32, fontSize: 20, fill: "#2E7D32",
           originX: "center", selectable: false, evented: false,
         });
         t.meta = { key: "annotation" };
         canvas.add(t);
+        // 통로 폭(세로) 치수선 — 좌측 끝에 표기
+        dimLine("v", yc - aisle / 2, yc + aisle / 2, sx0 + 60, "#2E7D32");
       };
       // 밴드 사이 통로마다 + 환자 밴드 앞 가로 복도에 표시
       bands.forEach((b) => {
@@ -1318,6 +1366,12 @@ const FloorCanvas = (() => {
         if (bandBottom + 60 < fieldY1) subPath(Math.min(bandBottom + aisle / 2, fieldY1 - 40));
       });
       subPath(fieldY1 + DOOR_CLEAR / 2); // 환자 밴드 문 앞 복도 (탈의실→병상 동선)
+      // 문 앞 복도 치수: 환자 밴드 앞(가로 복도) · 후방 밴드 앞(세로 복도)
+      dimLine("v", fieldY1, H - patientBandH - M, sx0 + 200, "#455A64");
+      dimLine("h",
+        techSide === "left" ? techBandW + M : W - techBandW - M - DOOR_CLEAR,
+        techSide === "left" ? techBandW + M + DOOR_CLEAR : W - techBandW - M,
+        fieldY1 - 60, "#455A64");
     }
 
     // ── 배관: 신장실 계통 트렁크(기술 밴드 벽체 매입) → 콘솔 내부 주행 → 분기 ──
