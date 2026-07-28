@@ -2533,6 +2533,13 @@ const FloorCanvas = (() => {
     distributeSelection, bringSelectionToFront, sendSelectionToBack,
     flipSelection, rotateSelection, toggleLockSelection, zoomBy, exportSVG,
     setLayer, deleteLayer, getLayers, applyLayers,
+    // N.S 아일랜드를 임의 위치에 직접 추가 (가구 목록 버튼용)
+    addStation: (x, y, seats) => {
+      beginBulk();
+      const ns = addStationIsland(x, y, seats ?? stationSeats, "left");
+      endBulk();
+      return ns;
+    },
     setSnap: (s) => { snapSize = s; },
     getRoom: () => room,
     getCanvas: () => canvas,

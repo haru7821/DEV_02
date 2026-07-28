@@ -16,6 +16,7 @@ const equipmentData = {
     requiresWater: true,
     isolationCapable: true,
   },
+  // 병상 모듈 내부에서 쓰는 일반 투석기 (툴바 목록에는 표시하지 않음)
   dialysis_machine: {
     label: "투석기 (Vantive)",
     shortLabel: "투석기",           // 캔버스 표시용 (사각형 안에 들어가는 짧은 이름)
@@ -23,9 +24,11 @@ const equipmentData = {
     color: "#2196F3",
     type: "equipment",
     requiresWater: true,
+    hidden: true,
   },
   // ── 제조사 기술자료의 바닥 점유 치수(cm) — 장비 선택용 ──
   fresenius_4008s: {
+    hidden: true,
     label: "투석기 (Fresenius 4008S)",
     shortLabel: "4008S",
     width: 50, height: 65,      // 500×650mm, H1370 (제조사 기술사양)
@@ -34,6 +37,7 @@ const equipmentData = {
     requiresWater: true,
   },
   fresenius_6008: {
+    hidden: true,
     label: "투석기 (Fresenius 6008)",
     shortLabel: "6008",
     width: 52, height: 78,      // 베이스 520×780mm, H1680 (6008 CAREsystem Technical Data)
@@ -42,14 +46,23 @@ const equipmentData = {
     requiresWater: true,
   },
   baxter_ak98: {
-    label: "투석기 (Baxter/Vantive AK98)",
+    label: "투석기 (Vantive AK98)",
     shortLabel: "AK98",
     width: 59, height: 62,      // 스탠드 585×620mm, H1305, 약 70kg (AK 98 Brochure)
     color: "#00838F",
     type: "equipment",
     requiresWater: true,
   },
+  vantive_artis: {
+    label: "투석기 (Vantive Artis)",
+    shortLabel: "Artis",
+    width: 50, height: 60,      // 개략 바닥 점유 500×600mm — 실제 반입 전 제조사 사양 확인 필요
+    color: "#0097A7",
+    type: "equipment",
+    requiresWater: true,
+  },
   nipro_surdial_x: {
+    hidden: true,
     label: "투석기 (Nipro Surdial X)",
     shortLabel: "Surdial X",
     width: 48, height: 90,      // 480×895mm, H1625 (MedicalExpo 사양서)

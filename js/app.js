@@ -51,6 +51,7 @@
   }
 
   function addEquipmentButton(key, spec) {
+    if (spec.hidden) return; // 목록에 노출하지 않는 에셋 (모듈 내부 전용 등)
     const target = spec.category === "wt" ? $("wt-buttons")
       : spec.category === "furn" ? $("furn-buttons")
       : spec.type === "room" ? $("room-buttons") : $("equipment-buttons");
@@ -109,6 +110,16 @@
         FloorCanvas.setModuleDepth(toCM(+$("module-depth").value));
         const r = FloorCanvas.getRoom();
         FloorCanvas.addBedUnit(Math.round(r.width / 2 - 90), Math.round(r.height / 2 - 110), false);
+      }));
+    // Nurse Station 카운터: 단순 사각형이 아니라 실제 아일랜드(카운터+데스크+의자)를
+    // 설정된 좌석 수대로 생성한다 — 가구 목록에 배치
+    $("furn-buttons").appendChild(makeAssetButton(
+      { label: "Nurse Station (카운터+데스크)", color: "#FF9800" }, "좌석 설정값",
+      () => {
+        FloorCanvas.setStationSeats(+$("station-seats").value);
+        const r = FloorCanvas.getRoom();
+        FloorCanvas.addStation(Math.round(r.width / 2 - 160), Math.round(r.height / 2 - 100));
+        toast("Nurse Station을 추가했습니다. 좌석 수는 Auto Modeling의 「스테이션 좌석」을 따릅니다.", "info");
       }));
     Object.entries(equipmentData).forEach(([key, spec]) => addEquipmentButton(key, spec));
     Object.entries(doorData).forEach(([key, spec]) => {

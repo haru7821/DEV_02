@@ -40,6 +40,11 @@ const View3D = (() => {
     MAT.desk = std(0xe8a33d, { roughness: 0.6 });
     MAT.chair = std(0x455a64, { roughness: 0.7 });
     MAT.equip = std(0xb0bec5, { roughness: 0.7 });
+    MAT.doorLeaf = std(0xd8c9a8, { roughness: 0.6 });   // 목재 문짝
+    MAT.glass = new THREE.MeshStandardMaterial({        // 자동문 유리
+      color: 0xbcd7e0, roughness: 0.1, metalness: 0.1,
+      transparent: true, opacity: 0.45,
+    });
   }
 
   /** 축 정렬 박스 추가: 도면 좌표(cm) + 바닥 기준 높이(m) */
@@ -89,14 +94,87 @@ const View3D = (() => {
     return { x: r.left, y: r.top, w: r.width, d: r.height };
   }
 
+  /**
+   * 회전을 반영해 배치한다.
+   * build(g, w, d)는 로컬 좌표 (0,0)~(w,d)에 형상을 만든다. 만들어진 형상을
+   * 객체 중심으로 옮긴 뒤, 도면의 회전각만큼 Y축으로 돌린다.
+   * (fabric의 각도는 화면 기준 시계방향 → three.js에서는 -각도)
+   */
+  function placeRotated(parent, o, build) {
+    const w = o.getScaledWidth(), d = o.getScaledHeight();
+    const inner = new THREE.Group();
+    build(inner, w, d);
+    inner.position.set(-M(w) / 2, 0, -M(d) / 2);  // 로컬 원점을 중심으로
+    const wrap = new THREE.Group();
+    wrap.add(inner);
+    const c = o.getCenterPoint();
+    wrap.position.set(M(c.x), 0, M(c.y));
+    wrap.rotation.y = -((o.angle || 0) * Math.PI) / 180;
+    parent.add(wrap);
+    return wrap;
+  }
+
+  /* ───────── 문짝 ─────────
+   * 개구부만 뚫으면 3D가 허전하고 개폐 방향도 알 수 없다.
+   * 여닫이는 실내로 35° 열린 문짝, 미닫이·자동문은 개구부 옆으로 물린 패널로 그린다. */
+  const DOOR_LEAF_T = 4;      // 문짝 두께(cm)
+  const OPEN_DEG = 35;        // 여닫이 열림 각
+
+  function buildDoor(group, o) {
+    const kind = o.meta.key;
+    const dw = (doorData[kind] && doorData[kind].width) || 90;
+    const mat = MAT.doorLeaf;
+    const c = o.getCenterPoint();
+    const wrap = new THREE.Group();
+    wrap.position.set(M(c.x), 0, M(c.y));
+    wrap.rotation.y = -((o.angle || 0) * Math.PI) / 180;
+    group.add(wrap);
+
+    const leaf = (len, hingeX, dir, angle) => {
+      // 로컬 X축을 따라 개구부가 놓인다. hingeX에서 angle만큼 열린 문짝.
+      const pivot = new THREE.Group();
+      pivot.position.set(M(hingeX), 0, 0);
+      pivot.rotation.y = angle;
+      const m = new THREE.Mesh(
+        new THREE.BoxGeometry(M(len), DOOR_H, M(DOOR_LEAF_T)), mat);
+      m.position.set((dir * M(len)) / 2, DOOR_H / 2, 0);
+      m.castShadow = true;
+      pivot.add(m);
+      wrap.add(pivot);
+    };
+
+    if (kind === "double_swing_door") {           // 양짝: 양쪽에서 각각 열림
+      leaf(dw / 2, -dw / 2, 1, -OPEN_DEG * Math.PI / 180);
+      leaf(dw / 2, dw / 2, -1, OPEN_DEG * Math.PI / 180);
+    } else if (kind === "swing_door") {           // 외짝 여닫이
+      leaf(dw, -dw / 2, 1, -OPEN_DEG * Math.PI / 180);
+    } else {                                      // 미닫이·자동문: 벽면에 물린 패널
+      const m = new THREE.Mesh(
+        new THREE.BoxGeometry(M(dw * 0.5), DOOR_H, M(DOOR_LEAF_T)),
+        kind === "auto_door" ? MAT.glass : mat);
+      m.position.set(-M(dw) / 4, DOOR_H / 2, 0);
+      m.castShadow = true;
+      wrap.add(m);
+      const m2 = m.clone();
+      m2.position.set(M(dw) / 4, DOOR_H / 2, M(DOOR_LEAF_T));
+      wrap.add(m2);
+    }
+  }
+
   /** 병상 모듈: 침대(프레임+매트리스+베개) + 투석기 */
-  function buildBedUnit(group, unit) {
-    const m = unit.calcTransformMatrix();
+  function buildBedUnit(parent, unit) {
+    // 유닛 자체의 회전은 placeRotated가 처리하고, 자식은 '회전 전' 로컬 좌표로 그린다
+    placeRotated(parent, unit, (group, uw, ud) => buildBedParts(group, unit, uw, ud));
+  }
+
+  function buildBedParts(group, unit, uw, ud) {
     const at = (child) => {
-      const p = fabric.util.transformPoint(child.getCenterPoint(), m);
+      // 그룹 로컬 좌표(중심 기준) → 로컬 사각형 좌표(0,0 기준)
       const w = child.width * (child.scaleX || 1) * (unit.scaleX || 1);
       const d = child.height * (child.scaleY || 1) * (unit.scaleY || 1);
-      return { x: p.x - w / 2, y: p.y - d / 2, w, d };
+      const p = child.getCenterPoint();
+      return { x: p.x * (unit.scaleX || 1) + uw / 2 - w / 2,
+               y: p.y * (unit.scaleY || 1) + ud / 2 - d / 2, w, d };
     };
     unit.getObjects().forEach((c) => {
       const key = c.meta && c.meta.key;
@@ -185,23 +263,26 @@ const View3D = (() => {
       const col = new THREE.Color(o.meta.color || "#e0e0e0");
       const fmat = MAT.roomFloor.clone();
       fmat.color = col.clone().lerp(new THREE.Color(0xffffff), 0.45);
-      const f = new THREE.Mesh(new THREE.PlaneGeometry(M(r.w), M(r.d)), fmat);
-      f.rotation.x = -Math.PI / 2;
-      f.position.set(M(r.x) + M(r.w) / 2, 0.006, M(r.y) + M(r.d) / 2);
-      f.receiveShadow = true;
-      root.add(f);
-      wallWithGaps(root, r.x, r.y, r.w, t, PARTITION_H, MAT.partition, true, gapsOn(r.x, r.y, r.w, true));
-      wallWithGaps(root, r.x, r.y + r.d - t, r.w, t, PARTITION_H, MAT.partition, true,
-        gapsOn(r.x, r.y + r.d, r.w, true));
-      wallWithGaps(root, r.x, r.y, r.d, t, PARTITION_H, MAT.partition, false, gapsOn(r.x, r.y, r.d, false));
-      wallWithGaps(root, r.x + r.w - t, r.y, r.d, t, PARTITION_H, MAT.partition, false,
-        gapsOn(r.x + r.w, r.y, r.d, false));
+      // 회전 반영: 로컬 좌표(0,0)~(w,d)에 바닥·4면 벽을 만들고 그룹째 돌린다
+      placeRotated(root, o, (g, w, d) => {
+        const f = new THREE.Mesh(new THREE.PlaneGeometry(M(w), M(d)), fmat);
+        f.rotation.x = -Math.PI / 2;
+        f.position.set(M(w) / 2, 0.006, M(d) / 2);
+        f.receiveShadow = true;
+        g.add(f);
+        // 문 개구부는 회전 없는 실에서만 정확하므로, 회전된 실은 벽을 통으로 세운다
+        const rot = Math.abs(o.angle || 0) > 0.5;
+        const gp = (gx, gy, len, horiz) => (rot ? [] : gapsOn(gx, gy, len, horiz));
+        wallWithGaps(g, 0, 0, w, t, PARTITION_H, MAT.partition, true, gp(r.x, r.y, w, true));
+        wallWithGaps(g, 0, d - t, w, t, PARTITION_H, MAT.partition, true, gp(r.x, r.y + r.d, w, true));
+        wallWithGaps(g, 0, 0, d, t, PARTITION_H, MAT.partition, false, gp(r.x, r.y, d, false));
+        wallWithGaps(g, w - t, 0, d, t, PARTITION_H, MAT.partition, false, gp(r.x + r.w, r.y, d, false));
+      });
     });
 
     // 배관 콘솔 (병상 머리맡 덕트)
     objs.filter((o) => o.meta.key === "bed_console").forEach((o) => {
-      const r = rectOf(o);
-      box(root, r.x, r.y, r.w, r.d, 0.95, MAT.console);
+      placeRotated(root, o, (g, w, d) => box(g, 0, 0, w, d, 0.95, MAT.console));
     });
 
     // 병상 모듈 (+ 눈높이 카메라가 볼 병상 필드 범위 기록)
@@ -216,10 +297,11 @@ const View3D = (() => {
     const ns = objs.find((o) => o.meta.key === "nurse_station");
     if (ns) buildStation(root, ns);
     objs.filter((o) => o.meta.key === "station_desk2").forEach((o) => {
-      const r = rectOf(o);
-      box(root, r.x, r.y + r.d * 0.42, r.w, r.d * 0.58, 0.75, MAT.desk); // 상판
-      [0.25, 0.72].forEach((f) => // 의자 2개 (뒤쪽 = 카운터 쪽)
-        box(root, r.x + r.w * f - 18, r.y + 4, 36, 32, 0.45, MAT.chair));
+      placeRotated(root, o, (g, w, d) => {
+        box(g, 0, d * 0.42, w, d * 0.58, 0.75, MAT.desk);   // 상판
+        [0.25, 0.72].forEach((f) =>                          // 의자 2개 (뒤쪽 = 카운터 쪽)
+          box(g, w * f - 18, 4, 36, 32, 0.45, MAT.chair));
+      });
     });
 
     // 그 밖의 장비·집기 (정수실 설비, 가구 등)
@@ -227,10 +309,12 @@ const View3D = (() => {
       .filter((o) => !["bed_console", "dialysis_bed", "dialysis_machine",
                        "station_desk2", "pipe", "module_frame"].includes(o.meta.key))
       .forEach((o) => {
-        const r = rectOf(o);
-        if (r.w < 8 || r.d < 8) return;
-        box(root, r.x, r.y, r.w, r.d, 0.9, MAT.equip);
+        if (o.getScaledWidth() < 8 || o.getScaledHeight() < 8) return;
+        placeRotated(root, o, (g, w, d) => box(g, 0, 0, w, d, 0.9, MAT.equip));
       });
+
+    // 문짝 (여닫이·양짝·미닫이·자동문)
+    objs.filter((o) => o.meta.isDoor).forEach((o) => buildDoor(root, o));
 
     return root;
   }
