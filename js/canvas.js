@@ -1295,13 +1295,16 @@ const FloorCanvas = (() => {
     // 배관 주행선이 사람 이동 통로를 가로지르지 않게 한다.
     // 죽은 공간 제거: 병상 격자(피치)로 딱 떨어지지 않는 잔여 폭을 주 동선이
     // 흡수한다 — 필드 끝에 사람이 쓸 수 없는 자투리가 남지 않는다.
+    // 주 동선은 '출입구에서 병상 필드 입구까지'만 확보한다 (corridor.y0 ~ H).
+    // 필드 안에서는 밴드 사이 보조통로가 이동을 맡으므로, 세로 띠를 필드 끝까지
+    // 비워 두면 그만큼 공간을 낭비하게 된다.
     const slackW = Math.max(0, ((fieldX1 - fieldX0) - mainCw) % moduleWidth);
     const mainCwFit = mainCw + Math.floor(slackW / 10) * 10;
     // 변형 축 ②: 주 동선을 후방 밴드 반대편(far) 또는 후방 밴드 쪽(near)에 둔다
     const corridorAtRight = (techSide === "left") === (corridorSide === "far");
     const corridor = corridorAtRight
-      ? { x0: fieldX1 - mainCwFit, x1: fieldX1 }
-      : { x0: fieldX0, x1: fieldX0 + mainCwFit };
+      ? { x0: fieldX1 - mainCwFit, x1: fieldX1, y0: fieldY1 }
+      : { x0: fieldX0, x1: fieldX0 + mainCwFit, y0: fieldY1 };
 
     // ── 간호처치실·조제실은 N.S에 붙인다 (업로드 도면 27bed 구성) ──
     // 처치·투약 준비는 스테이션 업무의 연장이므로 N.S에서 바깥쪽으로
@@ -1755,7 +1758,8 @@ const FloorCanvas = (() => {
       const row = [];
       let x = snapGrid(rx0);
       while (x + MW <= rx1) { // 목표 대수와 무관하게 행을 끝까지 채운다
-        if (corridor && x + MW > corridor.x0 && x < corridor.x1) {
+        if (corridor && yBed + MD > corridor.y0 &&
+            x + MW > corridor.x0 && x < corridor.x1) {
           x = snapGrid(corridor.x1 + 10); // 주 동선 통로는 비운다 (격자 위상 유지)
           continue;
         }
@@ -1858,7 +1862,7 @@ const FloorCanvas = (() => {
       // 밴드 개수 계산 + 남는 폭을 통로에 배분 (죽은 공간 최소화)
       // 양 끝 열의 '발쪽'이 벽·통로에 닿으므로 좌우로 발-벽 이격(800mm)을 확보한다
       const FOOT = MEDICAL_RULES.FOOT_WALL_CLEARANCE_CM;
-      const availW = fieldX1 - fieldX0 - mainCwFit - FOOT * 2;
+      const availW = fieldX1 - fieldX0 - FOOT * 2;
       let nb = Math.max(0, Math.floor((availW + aisle) / (bandW + aisle)));
       const gaps = Math.max(0, nb - 1);
       const aisleV = gaps > 0
@@ -1866,9 +1870,8 @@ const FloorCanvas = (() => {
             Math.floor((availW - nb * bandW - gaps * aisle) / gaps / 10) * 10)
         : aisle;
       // 주 동선을 피해 시작 x를 잡는다
-      let bx = (corridorAtRight ? fieldX0 : corridor.x1 + 10) + FOOT;
+      let bx = fieldX0 + FOOT;
       for (let i = 0; i < nb; i++) {
-        if (corridor && bx + bandW > corridor.x0 && bx < corridor.x1) bx = corridor.x1 + 10;
         if (bx + bandW > fieldX1 - FOOT) break;
         const left = fillCol(bx, false);                       // 왼쪽 열: 머리 오른쪽
         const consoleX = bx + MD + 3;
@@ -1932,8 +1935,8 @@ const FloorCanvas = (() => {
     // ── 동선 표시: 출입구 ↔ 스테이션 ↔ 병상 필드 주 통로 음영 + 화살표 ──
     if (corridor) {
       // 격리실과 겹치는 위치면 통로 음영을 격리실 아래부터 시작
-      const zoneTop = (isoZone && corridor.x1 > isoZone.left && corridor.x0 < isoZone.right)
-        ? isoZone.bottom + 20 : M + 10;
+      // 출입구에서 병상 필드 입구까지만 표시한다 (필드 안은 보조통로가 담당)
+      const zoneTop = corridor.y0;
       // 주 동선은 '출입구'에서 시작해 병상 필드 끝까지 이어진다
       const zone = new fabric.Rect({
         left: corridor.x0, top: zoneTop,
@@ -1958,7 +1961,7 @@ const FloorCanvas = (() => {
       });
       inText.meta = { key: "annotation" };
       canvas.add(inText);
-      for (let ay = H - patientBandH - M - 90; ay > M + 80; ay -= 320) {
+      for (let ay = H - 160; ay > zoneTop + 40; ay -= 320) {
         const tri = new fabric.Triangle({
           left: cc - 18, top: ay, width: 36, height: 46,
           fill: "rgba(249,168,37,0.55)", selectable: false, evented: false,
@@ -1967,7 +1970,7 @@ const FloorCanvas = (() => {
         canvas.add(tri);
       }
       const label = new fabric.Text(`주 동선 ${(corridor.x1 - corridor.x0) * 10}`, {
-        left: cc, top: H - patientBandH - M - 45, fontSize: 26, fill: "#F57F17",
+        left: cc, top: zoneTop + 12, fontSize: 26, fill: "#F57F17",
         originX: "center", selectable: false, evented: false,
       });
       label.meta = { key: "annotation" };
