@@ -262,12 +262,11 @@ const View3D = (() => {
       } else if (key === "dialysis_machine") {
         const q = at(c);
         box(group, q.x, q.y, q.w, q.d, 1.05, MAT.machine);               // 본체
-        // 조작 패널은 환자(침대) 쪽 면에 붙인다
-        if (unit.meta.vertical) {
-          // 세로 모듈은 투석기가 늘 오른쪽 끝이고 침대는 위(headLeft) 또는 아래에 있다
-          const sy = unit.meta.headLeft ? q.y + 1 : q.y + q.d - 6;
-          box(group, q.x + 4, sy, q.w - 8, 5, 0.34, MAT.screen, 1.05);
-        } else {
+        // 투석기는 머리맡에 서서 '발쪽'을 바라본다 — 조작 패널을 발쪽 면에 붙인다
+        if (unit.meta.vertical) {   // 세로 모듈: 발쪽이 좌/우
+          const sx = unit.meta.headLeft ? q.x + q.w - 6 : q.x + 1;
+          box(group, sx, q.y + 4, 5, q.d - 8, 0.34, MAT.screen, 1.05);
+        } else {                    // 가로 모듈: 발쪽이 위/아래
           const sy = unit.meta.headDown ? q.y + 1 : q.y + q.d - 6;
           box(group, q.x + 4, sy, q.w - 8, 5, 0.34, MAT.screen, 1.05);
         }

@@ -745,10 +745,15 @@ const FloorCanvas = (() => {
   /**
    * 세로 콘솔용 병상 모듈 — 가로 모듈을 전치한 형태 (27bed 도면의 팟 구조).
    * 머리맡이 좌/우를 향하고 콘솔이 세로로 지나간다. headLeft=true면 머리맡이 왼쪽.
-   * 침대는 모듈 폭을 가득 채우고, 투석기는 머리 방향과 무관하게
-   * '항상 침대의 오른쪽(모듈 오른쪽 끝)'에 둔다 — 세로 모드에서도 도면을 볼 때
-   * [침대][투석기] 순서가 일정하게 읽히도록 한다.
-   * 세로 위치는 침대와 겹치지 않는 모듈 내 여유 구간(병상 사이 틈)이다.
+   *
+   * 투석기 배치 규칙 (세 가지를 동시에 만족해야 한다):
+   *   ① 머리쪽 — 침대의 머리맡 끝(= 콘솔 쪽)에 붙는다. 배관이 콘솔에서 바로 온다.
+   *   ② 환자 기준 오른쪽 — 환자는 천장을 보고 눕는다. 머리가 왼쪽이면 환자의
+   *      오른쪽은 화면 아래, 머리가 오른쪽이면 화면 위다.
+   *   ③ 발쪽을 바라본다 — 정면(조작 패널)이 침대 길이 방향으로 발쪽을 향한다.
+   *      카탈로그 투석기는 폭 500 × 깊이 700이므로 전치하면 가로 700 × 세로 500,
+   *      즉 깊이가 침대 축과 나란하고 폭 500짜리 면이 발쪽을 향한다.
+   *      3D 조작 패널도 이 면에 붙인다 (view3d.js buildBedParts 참고).
    */
   function addBedUnitV(x, y, isolated, headLeft) {
     const mw = moduleWidth, md = moduleDepth; // mw = 병상 피치(세로), md = 침대 길이(가로)
@@ -759,18 +764,19 @@ const FloorCanvas = (() => {
     });
     frame.meta = { key: "module_frame", label: "모듈 경계" };
     canvas.add(frame);
-    const BED_W = 120, MACHINE_W = 50;   // 침대 폭 · 투석기 폭 (전치 시 세로 치수)
-    const MAC_L = 70;                    // 투석기 가로 치수 (전치 시)
-    const gapIn = Math.max(3, Math.round((mw - BED_W - MACHINE_W) / 2));
+    const BED_W = 120;                   // 침대 폭 (전치 시 세로 치수)
+    const MAC_D = 70, MAC_W = 50;        // 투석기 깊이(침대 축 방향) · 폭(발쪽을 향하는 면)
+    const gapIn = Math.max(3, Math.round((mw - BED_W - MAC_W) / 2));
     const bedY = headLeft ? y : y + mw - BED_W;
-    const macY = headLeft ? y + mw - gapIn - MACHINE_W : y + gapIn;
+    // ② 환자 오른쪽: 머리가 왼쪽이면 아래, 오른쪽이면 위
+    const macY = headLeft ? y + mw - gapIn - MAC_W : y + gapIn;
     const bed = addEquipment("dialysis_bed", {
       left: x, top: bedY, width: md, height: BED_W, silent: true, inUnit: true,
     });
-    // 투석기는 머리 방향과 무관하게 항상 모듈 오른쪽 끝 — [침대][투석기]
+    // ① 머리쪽 끝 + ③ 깊이가 침대 축과 나란해 정면이 발쪽을 향한다
     const machine = addEquipment("dialysis_machine", {
-      left: x + md - MAC_L, top: macY,
-      width: MAC_L, height: MACHINE_W, silent: true,
+      left: headLeft ? x : x + md - MAC_D, top: macY,
+      width: MAC_D, height: MAC_W, silent: true,
     });
     const sel = new fabric.ActiveSelection([frame, bed, machine], { canvas });
     const grp = sel.toGroup();
@@ -2087,22 +2093,13 @@ const FloorCanvas = (() => {
         // 상단 가로 트렁크에서 콘솔 머리로 인입 후 세로 주행
         addPipe([{ x: trunkX, y: y0 }, { x: inX, y: y0 }, { x: inX, y: y1 }], "inlet");
         addPipe([{ x: trunkX, y: y0 + 14 }, { x: drX, y: y0 + 14 }, { x: drX, y: y1 }], "drain");
-        // 투석기는 늘 모듈 오른쪽 끝에 있으므로, 분기는 그 실제 위치로 보낸다.
-        // 분기선이 지나는 y는 투석기가 놓인 '병상 사이 틈'이라 침대를 가로지르지 않는다.
-        const macOf = (u) => {
-          const m = (u.getObjects ? u.getObjects() : [])
-            .find((o) => o.meta && o.meta.key === "dialysis_machine");
-          if (!m) return null;
-          const p = fabric.util.transformPoint(m.getCenterPoint(), u.calcTransformMatrix());
-          return { x: p.x, y: Math.round(p.y), w: m.getScaledWidth() };
-        };
-        above.forEach((b) => { // 왼쪽 열: 콘솔에서 왼쪽 투석기로 분기 (콘솔 바로 옆)
-          const m = macOf(b);
-          if (m) addPipe([{ x: inX, y: m.y }, { x: Math.round(m.x + m.w / 2), y: m.y }], "inlet");
+        above.forEach((b) => { // 왼쪽 열: 콘솔에서 왼쪽으로 분기
+          const py = b.top + Math.round(b.height / 2);
+          addPipe([{ x: inX, y: py }, { x: b.left + b.width - 20, y: py }], "inlet");
         });
-        below.forEach((b) => { // 오른쪽 열: 투석기가 반대쪽 끝이므로 틈을 따라 건너간다
-          const m = macOf(b);
-          if (m) addPipe([{ x: inX, y: m.y }, { x: Math.round(m.x - m.w / 2), y: m.y }], "inlet");
+        below.forEach((b) => { // 오른쪽 열: 콘솔에서 오른쪽으로 분기
+          const py = b.top + Math.round(b.height / 2);
+          addPipe([{ x: inX, y: py }, { x: b.left + 20, y: py }], "inlet");
         });
       });
       bands.filter((b) => !b.vertical).forEach(({ consoleY, above, below }) => {
