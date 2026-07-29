@@ -264,8 +264,9 @@ const View3D = (() => {
         box(group, q.x, q.y, q.w, q.d, 1.05, MAT.machine);               // 본체
         // 조작 패널은 환자(침대) 쪽 면에 붙인다
         if (unit.meta.vertical) {
-          const sx = unit.meta.headLeft ? q.x + q.w - 6 : q.x + 1;
-          box(group, sx, q.y + 4, 5, q.d - 8, 0.34, MAT.screen, 1.05);
+          // 세로 모듈은 투석기가 늘 오른쪽 끝이고 침대는 위(headLeft) 또는 아래에 있다
+          const sy = unit.meta.headLeft ? q.y + 1 : q.y + q.d - 6;
+          box(group, q.x + 4, sy, q.w - 8, 5, 0.34, MAT.screen, 1.05);
         } else {
           const sy = unit.meta.headDown ? q.y + 1 : q.y + q.d - 6;
           box(group, q.x + 4, sy, q.w - 8, 5, 0.34, MAT.screen, 1.05);
